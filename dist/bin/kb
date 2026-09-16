@@ -1,0 +1,914 @@
+#!/usr/bin/env node
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve, sep } from "node:path";
+//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@intentic+base@1.281.0/node_modules/@intentic/base/dist/errors.js
+var errorMessage = (error) => error instanceof Error ? error.message : String(error);
+//#endregion
+//#region src/notes/frontmatter.ts
+var FRONTMATTER = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
+var scalar = (raw) => {
+	const value = raw.trim();
+	return ((/^"(.*)"$/s.exec(value) ?? /^'(.*)'$/s.exec(value))?.[1] ?? value).trim();
+};
+var flowItems = (inner) => {
+	const items = [];
+	let current = "";
+	let quote;
+	for (const char of inner) if (quote !== void 0) {
+		if (char === quote) quote = void 0;
+		current += char;
+	} else if (char === "\"" || char === "'") {
+		quote = char;
+		current += char;
+	} else if (char === ",") {
+		items.push(current);
+		current = "";
+	} else current += char;
+	items.push(current);
+	return items.map(scalar).filter((item) => item !== "");
+};
+var KEY_NAME = /^[A-Za-z_][\w.-]*$/;
+var keyLine = (line) => {
+	const colon = line.indexOf(":");
+	if (colon === -1) return;
+	let nameEnd = colon;
+	while (line[nameEnd - 1] === " " || line[nameEnd - 1] === "	") nameEnd--;
+	const name = line.slice(0, nameEnd);
+	return KEY_NAME.test(name) ? [name, line.slice(colon + 1).trim()] : void 0;
+};
+var blockItem = (line) => {
+	let dash = 0;
+	while (line[dash] === " " || line[dash] === "	") dash++;
+	if (dash === 0 || line[dash] !== "-") return;
+	let valueStart = dash + 1;
+	while (line[valueStart] === " " || line[valueStart] === "	") valueStart++;
+	return line.slice(valueStart);
+};
+var parseFrontmatter = (content) => {
+	const match = FRONTMATTER.exec(content);
+	if (match === null) return {
+		fields: /* @__PURE__ */ new Map(),
+		unreadable: [],
+		body: content,
+		present: false
+	};
+	const fields = /* @__PURE__ */ new Map();
+	const unreadable = [];
+	const lines = (match[1] ?? "").split(/\r?\n/);
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i] ?? "";
+		if (line.trim() === "" || line.trimStart().startsWith("#") || /^[ \t]/.test(line)) continue;
+		const key = keyLine(line);
+		if (key === void 0) continue;
+		const [name, inline] = key;
+		const flow = /^\[(.*)\]$/s.exec(inline);
+		if (flow !== null) {
+			fields.set(name, flowItems(flow[1] ?? ""));
+			continue;
+		}
+		if (inline !== "") {
+			fields.set(name, [scalar(inline)]);
+			continue;
+		}
+		const items = [];
+		let j = i + 1;
+		for (; j < lines.length; j++) {
+			const next = lines[j] ?? "";
+			if (next.trim() === "") continue;
+			const item = blockItem(next);
+			if (item === void 0) break;
+			const value = scalar(item);
+			if (value !== "") items.push(value);
+		}
+		if (items.length > 0) fields.set(name, items);
+		else unreadable.push(name);
+		i = j - 1;
+	}
+	return {
+		fields,
+		unreadable,
+		body: content.slice(match[0].length),
+		present: true
+	};
+};
+var needsQuotes = (value) => value === "" || /^[[\-#&*!|>%@`'"]/.test(value) || /:\s|\s#|^\s|\s$/.test(value);
+var emit$1 = (value) => needsQuotes(value) ? `"${value.replace(/(["\\])/g, "\\$1")}"` : value;
+var formatFrontmatter = (fields, body) => {
+	const lines = [];
+	for (const [key, values] of fields) {
+		if (values.length === 0) continue;
+		lines.push(values.length === 1 ? `${key}: ${emit$1(values[0] ?? "")}` : `${key}: [${values.map(emit$1).join(", ")}]`);
+	}
+	return `---\n${lines.join("\n")}\n---\n${body.replace(/^\n+/, "")}`;
+};
+//#endregion
+//#region src/notes/wiki-links.ts
+var wikiLinksIn = (text) => {
+	const links = [];
+	let cursor = 0;
+	while (cursor < text.length) {
+		const start = text.indexOf("[[", cursor);
+		if (start === -1) break;
+		const close = text.indexOf("]]", start + 2);
+		if (close === -1) break;
+		const value = text.slice(start + 2, close);
+		const separator = value.indexOf("|");
+		const target = separator === -1 ? value : value.slice(0, separator);
+		const label = separator === -1 ? void 0 : value.slice(separator + 1);
+		if (target !== "" && !target.includes("[") && !target.includes("]") && label !== "" && !label?.includes("]")) links.push({
+			start,
+			end: close + 2,
+			target,
+			label
+		});
+		cursor = close + 2;
+	}
+	return links;
+};
+//#endregion
+//#region src/notes/note.ts
+var RESERVED = /* @__PURE__ */ new Set([
+	"type",
+	"title",
+	"aliases",
+	"tags",
+	"created",
+	"updated",
+	"types",
+	"relations"
+]);
+var INLINE_TAG = /(?:^|\s)#([a-z0-9][\w/-]*)/giu;
+var slugOf = (path) => path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/i, "");
+var titleFromSlug = (slug) => {
+	const words = slug.replace(/[-_]+/g, " ").trim();
+	return words === "" ? slug : words.charAt(0).toUpperCase() + words.slice(1);
+};
+var firstHeading = (body) => {
+	for (const line of body.split(/\r?\n/)) {
+		if (!line.startsWith("#")) continue;
+		let textStart = 1;
+		while (line[textStart] === " " || line[textStart] === "	") textStart++;
+		if (textStart > 1) {
+			const heading = line.slice(textStart).trim();
+			if (heading !== "") return heading;
+		}
+	}
+};
+var linksIn = (text, relation) => {
+	const links = [];
+	for (const match of wikiLinksIn(text)) {
+		const target = match.target.trim();
+		if (target !== "") links.push({
+			target,
+			label: match.label?.trim(),
+			relation
+		});
+	}
+	return links;
+};
+var withoutCode = (body) => body.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, "");
+var parseNote = (file) => {
+	const { fields, unreadable, body } = parseFrontmatter(file.content);
+	const prose = withoutCode(body);
+	const links = [...[...fields].flatMap(([key, values]) => RESERVED.has(key) ? [] : values.flatMap((value) => linksIn(value, key))), ...linksIn(prose, void 0)];
+	const inlineTags = [...prose.matchAll(INLINE_TAG)].map((match) => (match[1] ?? "").toLowerCase());
+	const slug = slugOf(file.path);
+	return {
+		path: file.path,
+		slug,
+		title: fields.get("title")?.[0] ?? firstHeading(body) ?? titleFromSlug(slug),
+		type: fields.get("type")?.[0],
+		aliases: fields.get("aliases") ?? [],
+		tags: [.../* @__PURE__ */ new Set([...(fields.get("tags") ?? []).map((tag) => tag.replace(/^#/, "").toLowerCase()), ...inlineTags])],
+		fields,
+		unreadable,
+		links,
+		body,
+		content: file.content,
+		modifiedAt: file.modifiedAt,
+		sizeBytes: file.sizeBytes
+	};
+};
+var factsOf = (note) => [...note.fields].filter(([key, values]) => !RESERVED.has(key) && !values.some((value) => value.includes("[[")));
+//#endregion
+//#region src/notes/vocabulary.ts
+var VOCABULARY_TYPE = "vocabulary";
+var VOCABULARY_PATH = "_vocabulary.md";
+var EMPTY_VOCABULARY = {
+	types: [],
+	relations: [],
+	path: void 0
+};
+var readVocabulary = (notes) => {
+	const note = notes.find((candidate) => candidate.type === VOCABULARY_TYPE);
+	if (note === void 0) return EMPTY_VOCABULARY;
+	return {
+		types: note.fields.get("types") ?? [],
+		relations: note.fields.get("relations") ?? [],
+		path: note.path
+	};
+};
+var tally = (entries) => {
+	const byWord = /* @__PURE__ */ new Map();
+	for (const [word, path] of entries) byWord.set(word, [...byWord.get(word) ?? [], path]);
+	return [...byWord].map(([word, paths]) => ({
+		word,
+		uses: paths.length,
+		notes: paths.slice(0, 10)
+	})).toSorted((a, b) => b.uses - a.uses || a.word.localeCompare(b.word));
+};
+var typeDrift = (notes, vocabulary) => {
+	if (vocabulary.path === void 0) return [];
+	const declared = /* @__PURE__ */ new Set([...vocabulary.types, VOCABULARY_TYPE]);
+	return tally(notes.flatMap((note) => note.type === void 0 || declared.has(note.type) ? [] : [[note.type, note.path]]));
+};
+var relationDrift = (notes, vocabulary) => {
+	if (vocabulary.path === void 0) return [];
+	const declared = new Set(vocabulary.relations);
+	return tally(notes.flatMap((note) => [...new Set(note.links.flatMap((link) => link.relation === void 0 || declared.has(link.relation) ? [] : [link.relation]))].map((relation) => [relation, note.path])));
+};
+//#endregion
+//#region src/notes/index-notes.ts
+var normalise = (value) => value.trim().toLowerCase();
+var pathKeys = (path) => {
+	const withoutExtension = path.replace(/\.md$/i, "");
+	return [normalise(path), normalise(withoutExtension)];
+};
+var buildLookup = (notes) => {
+	const lookup = /* @__PURE__ */ new Map();
+	const ambiguous = /* @__PURE__ */ new Map();
+	const passes = [
+		(note) => pathKeys(note.path),
+		(note) => [normalise(note.slug)],
+		(note) => [normalise(note.title)],
+		(note) => note.aliases.map(normalise)
+	];
+	for (const keysOf of passes) {
+		const claimed = /* @__PURE__ */ new Map();
+		for (const note of notes) for (const key of keysOf(note)) {
+			if (key === "") continue;
+			const held = claimed.get(key);
+			if (held === void 0) claimed.set(key, note);
+			else if (held !== note) ambiguous.set(key, [.../* @__PURE__ */ new Set([...ambiguous.get(key) ?? [held.path], note.path])]);
+		}
+		for (const [key, note] of claimed) if (!lookup.has(key)) lookup.set(key, note);
+	}
+	return {
+		lookup,
+		ambiguous
+	};
+};
+var buildIndex = (files) => {
+	const notes = files.map(parseNote).toSorted((a, b) => a.path.localeCompare(b.path));
+	const { lookup, ambiguous } = buildLookup(notes);
+	const resolve = (target) => {
+		const key = normalise(target.split("#")[0] ?? target);
+		return lookup.get(key) ?? lookup.get(key.replace(/\.md$/i, ""));
+	};
+	const edges = notes.flatMap((note) => note.links.map((link) => ({
+		from: note.path,
+		to: resolve(link.target)?.path,
+		target: link.target,
+		relation: link.relation
+	})));
+	const backlinks = /* @__PURE__ */ new Map();
+	const outgoing = /* @__PURE__ */ new Map();
+	for (const edge of edges) {
+		outgoing.set(edge.from, [...outgoing.get(edge.from) ?? [], edge]);
+		if (edge.to !== void 0 && edge.to !== edge.from) backlinks.set(edge.to, [...backlinks.get(edge.to) ?? [], edge]);
+	}
+	return {
+		notes,
+		byPath: new Map(notes.map((note) => [note.path, note])),
+		edges,
+		backlinks,
+		outgoing,
+		vocabulary: readVocabulary(notes),
+		ambiguous,
+		resolve
+	};
+};
+var counted = (values) => {
+	const counts = /* @__PURE__ */ new Map();
+	for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+	return [...counts].map(([name, count]) => ({
+		name,
+		count
+	})).toSorted((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+};
+var overviewOf = (index) => ({
+	noteCount: index.notes.length,
+	linkCount: index.edges.length,
+	types: counted(index.notes.flatMap((note) => note.type === void 0 ? [] : [note.type])),
+	tags: counted(index.notes.flatMap((note) => note.tags)),
+	vocabulary: index.vocabulary,
+	broken: index.edges.flatMap((edge) => edge.to === void 0 ? [{
+		from: edge.from,
+		target: edge.target,
+		relation: edge.relation
+	}] : []),
+	orphans: index.notes.filter((note) => note.type !== "vocabulary" && (index.backlinks.get(note.path) ?? []).length === 0 && (index.outgoing.get(note.path) ?? []).length === 0).map((note) => note.path),
+	untyped: index.notes.filter((note) => note.type === void 0).map((note) => note.path),
+	typeDrift: typeDrift(index.notes, index.vocabulary),
+	relationDrift: relationDrift(index.notes, index.vocabulary),
+	unreadable: index.notes.flatMap((note) => note.unreadable.length === 0 ? [] : [{
+		path: note.path,
+		keys: note.unreadable
+	}]),
+	ambiguous: [...index.ambiguous].map(([name, notes]) => ({
+		name,
+		notes
+	})).toSorted((a, b) => a.name.localeCompare(b.name))
+});
+//#endregion
+//#region src/notes/query.ts
+var DEFAULT_LIMIT = 50;
+var TITLE_EXACT = 1e3;
+var ALIAS_EXACT = 900;
+var TITLE_PREFIX = 700;
+var TITLE_CONTAINS = 500;
+var TAG_OR_TYPE = 300;
+var FIELD = 200;
+var BODY = 100;
+var withoutWikiMarkers = (line) => {
+	const plain = [];
+	let cursor = 0;
+	for (const link of wikiLinksIn(line)) {
+		plain.push(line.slice(cursor, link.start), (link.label ?? link.target).trim());
+		cursor = link.end;
+	}
+	plain.push(line.slice(cursor));
+	return plain.join("");
+};
+var plainly = (line) => withoutWikiMarkers(line).replace(/`([^`]*)`/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/(^|\s)[*_]([^*_]+)[*_](?=\s|$|[.,;:!?])/g, "$1$2").replace(/^#{1,6}\s+/, "").replace(/^[-*+]\s+/, "").trim();
+var bodyHit = (note, needle) => {
+	const lines = note.body.split(/\r?\n/);
+	let hits = 0;
+	let line;
+	for (const candidate of lines) if (candidate.toLowerCase().includes(needle)) {
+		hits++;
+		line ??= plainly(candidate);
+	}
+	return {
+		hits,
+		line
+	};
+};
+var scoreNote = (note, needle) => {
+	const title = note.title.toLowerCase();
+	if (title === needle || note.slug.toLowerCase() === needle) return {
+		score: TITLE_EXACT,
+		matched: "title",
+		snippet: void 0
+	};
+	if (note.aliases.some((alias) => alias.toLowerCase() === needle)) return {
+		score: ALIAS_EXACT,
+		matched: "alias",
+		snippet: void 0
+	};
+	if (title.startsWith(needle)) return {
+		score: TITLE_PREFIX,
+		matched: "title",
+		snippet: void 0
+	};
+	if (title.includes(needle) || note.slug.toLowerCase().includes(needle)) return {
+		score: TITLE_CONTAINS,
+		matched: "title",
+		snippet: void 0
+	};
+	if (note.tags.includes(needle) || note.type?.toLowerCase() === needle) return {
+		score: TAG_OR_TYPE,
+		matched: note.tags.includes(needle) ? "tag" : "type",
+		snippet: void 0
+	};
+	for (const [key, values] of factsOf(note)) {
+		const value = values.find((candidate) => candidate.toLowerCase().includes(needle));
+		if (value !== void 0) return {
+			score: FIELD,
+			matched: "field",
+			snippet: `${key}: ${value}`
+		};
+	}
+	const { hits, line } = bodyHit(note, needle);
+	return hits === 0 ? void 0 : {
+		score: BODY + Math.min(hits, 8),
+		matched: "body",
+		snippet: line
+	};
+};
+var search = (index, filters) => {
+	const needle = filters.query?.trim().toLowerCase() ?? "";
+	const linkedTo = filters.linkedTo === void 0 ? void 0 : index.resolve(filters.linkedTo)?.path;
+	const linked = linkedTo === void 0 ? void 0 : new Set((index.backlinks.get(linkedTo) ?? []).map((edge) => edge.from));
+	const hits = [];
+	for (const note of index.notes) {
+		if (filters.type !== void 0 && note.type?.toLowerCase() !== filters.type.toLowerCase()) continue;
+		if (filters.tag !== void 0 && !note.tags.includes(filters.tag.toLowerCase())) continue;
+		if (linked !== void 0 && !linked.has(note.path)) continue;
+		const scored = needle === "" ? {
+			score: 0,
+			matched: "all",
+			snippet: void 0
+		} : scoreNote(note, needle);
+		if (scored === void 0) continue;
+		hits.push({
+			path: note.path,
+			title: note.title,
+			type: note.type,
+			tags: note.tags,
+			modifiedAt: note.modifiedAt,
+			matched: scored.matched,
+			snippet: scored.snippet,
+			score: scored.score
+		});
+	}
+	return hits.toSorted((a, b) => b.score - a.score || b.modifiedAt - a.modifiedAt || a.path.localeCompare(b.path)).slice(0, filters.limit ?? DEFAULT_LIMIT);
+};
+var MAX_NODES = 60;
+var neighbourhood = (index, focus, depth) => {
+	const start = index.resolve(focus) ?? index.byPath.get(focus);
+	if (start === void 0) return {
+		focus: void 0,
+		nodes: [],
+		edges: [],
+		omitted: 0
+	};
+	const seen = /* @__PURE__ */ new Map([[start.path, 0]]);
+	let frontier = [start.path];
+	let omitted = 0;
+	for (let step = 1; step <= depth && frontier.length > 0; step++) {
+		const next = [];
+		for (const path of frontier) {
+			const touching = [...index.outgoing.get(path) ?? [], ...index.backlinks.get(path) ?? []];
+			for (const edge of touching) {
+				const other = edge.from === path ? edge.to : edge.from;
+				if (other === void 0 || seen.has(other)) continue;
+				if (seen.size >= MAX_NODES) {
+					omitted++;
+					continue;
+				}
+				seen.set(other, step);
+				next.push(other);
+			}
+		}
+		frontier = next;
+	}
+	const nodes = [...seen].map(([path, depthOf]) => {
+		const note = index.byPath.get(path);
+		return {
+			path,
+			title: note?.title ?? path,
+			type: note?.type,
+			depth: depthOf
+		};
+	}).toSorted((a, b) => a.depth - b.depth || a.title.localeCompare(b.title));
+	const edges = index.edges.filter((edge) => edge.to !== void 0 && seen.has(edge.from) && seen.has(edge.to));
+	return {
+		focus: start.path,
+		nodes,
+		edges,
+		omitted
+	};
+};
+//#endregion
+//#region src/notes/read-notes.ts
+var DEFAULT_FOLDER = "knowledge";
+var SKIP_DIRS = /* @__PURE__ */ new Set([
+	".git",
+	".obsidian",
+	".trash",
+	".intentic",
+	"node_modules",
+	".cache"
+]);
+var knowledgeRoot = (workspaceRoot, configured) => {
+	const folder = configured?.trim();
+	if (folder === void 0 || folder === "" || folder.split("/").includes("..") || folder.startsWith("/")) return join(workspaceRoot, DEFAULT_FOLDER);
+	return join(workspaceRoot, folder);
+};
+var configuredFolder = async (workspaceRoot) => {
+	try {
+		const value = JSON.parse(await readFile(join(workspaceRoot, ".intentic/config/extension-settings.json"), "utf8"))["intentic.knowledge"]?.["folder"];
+		return typeof value === "string" ? value : void 0;
+	} catch {
+		return;
+	}
+};
+var resolveWithin = (dir, relPath) => {
+	const base = resolve(dir);
+	const target = resolve(base, relPath);
+	const rel = relative(base, target);
+	return rel === "" || rel === ".." || rel.startsWith(`..${sep}`) ? void 0 : target;
+};
+var resolveNote = (root, name) => {
+	const target = resolveWithin(root, name);
+	return target === void 0 || !target.toLowerCase().endsWith(".md") ? void 0 : target;
+};
+var readNotes = async (root) => {
+	const files = [];
+	const walk = async (dir) => {
+		let entries;
+		try {
+			entries = await readdir(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		await Promise.all(entries.map(async (entry) => {
+			const full = join(dir, entry.name);
+			if (entry.isDirectory()) {
+				if (!SKIP_DIRS.has(entry.name)) await walk(full);
+				return;
+			}
+			if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".md")) return;
+			try {
+				const [content, info] = await Promise.all([readFile(full, "utf8"), stat(full)]);
+				files.push({
+					path: relative(root, full).split(sep).join("/"),
+					content,
+					modifiedAt: Math.round(info.mtimeMs),
+					sizeBytes: info.size
+				});
+			} catch {}
+		}));
+	};
+	await walk(root);
+	return files;
+};
+var writeNote = async (root, name, content) => {
+	const target = resolveNote(root, name);
+	if (target === void 0) return false;
+	await mkdir(dirname(target), { recursive: true });
+	await writeFile(target, content);
+	return true;
+};
+//#endregion
+//#region src/cli/args.ts
+var SWITCHES = /* @__PURE__ */ new Set([
+	"json",
+	"help",
+	"all"
+]);
+var parseArgs = (argv) => {
+	const positionals = [];
+	const flags = /* @__PURE__ */ new Map();
+	const push = (name, value) => {
+		flags.set(name, [...flags.get(name) ?? [], value]);
+	};
+	for (let i = 0; i < argv.length; i++) {
+		const arg = argv[i] ?? "";
+		if (!arg.startsWith("--")) {
+			positionals.push(arg);
+			continue;
+		}
+		const [name, inline] = (() => {
+			const cut = arg.indexOf("=");
+			return cut === -1 ? [arg.slice(2), void 0] : [arg.slice(2, cut), arg.slice(cut + 1)];
+		})();
+		if (SWITCHES.has(name)) {
+			push(name, inline ?? "true");
+			continue;
+		}
+		if (inline !== void 0) {
+			push(name, inline);
+			continue;
+		}
+		const next = argv[i + 1];
+		if (next === void 0 || next.startsWith("--")) {
+			push(name, "");
+			continue;
+		}
+		push(name, next);
+		i++;
+	}
+	return {
+		verb: positionals[0] ?? "",
+		positionals: positionals.slice(1),
+		flags
+	};
+};
+var flag = (args, name) => {
+	const last = args.flags.get(name)?.at(-1);
+	return last === void 0 || last === "" ? void 0 : last;
+};
+var flagAll = (args, name) => (args.flags.get(name) ?? []).filter((value) => value !== "");
+var has = (args, name) => args.flags.has(name);
+var number = (args, name, fallback) => {
+	const parsed = Number(flag(args, name));
+	return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+};
+//#endregion
+//#region src/cli/note-shape.ts
+var linkFields = (pairs) => {
+	const fields = /* @__PURE__ */ new Map();
+	for (const pair of pairs) {
+		const cut = pair.indexOf("=");
+		if (cut <= 0) continue;
+		const relation = pair.slice(0, cut).trim();
+		const target = pair.slice(cut + 1).trim();
+		if (relation === "" || target === "") continue;
+		fields.set(relation, [...fields.get(relation) ?? [], wikiLink(target)]);
+	}
+	return fields;
+};
+var wikiLink = (target) => target.startsWith("[[") ? target : `[[${target}]]`;
+var slugify = (title) => title.toLowerCase().normalize("NFKD").replace(/[^\w\s-]/g, "").trim().replace(/[\s_]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "note";
+//#endregion
+//#region src/cli/kb.ts
+var USAGE = `kb, the knowledge base: notes, the things in them, and how they connect.
+
+  kb find <words…>            search names, facts and prose        [--type --tag --linked-to --limit]
+  kb list                     every note, newest first             [--type --tag --limit]
+  kb read <name>              one note, with what it links to and what links to it
+  kb links <name>             just the connections, both directions
+  kb graph <name>             everything within a few steps        [--depth]
+  kb new <title>              write a correctly shaped note        [--type --tag --link rel=target --body --path]
+  kb set <name> <field> [v…]  replace a header field (no value clears it)
+  kb link <name> <rel> <to>   connect two notes by a named relationship
+  kb check                    broken links, orphans, vocabulary drift, unreadable headers
+  kb vocab                    the kinds and relationships this knowledge base has adopted
+
+A <name> is anything that names a note: its title, an alias, its filename or its path.
+Add --json to any of these. Knowledge folder: $KB_FOLDER (default "knowledge/" in the workspace).`;
+var chips = (note) => [note.type, ...note.tags.map((tag) => `#${tag}`)].filter((chip) => chip !== void 0 && chip !== "").join(" ");
+var arrow = (edge, index, direction) => {
+	const other = direction === "out" ? edge.to : edge.from;
+	const name = other === void 0 ? `${edge.target} (not written yet)` : index.byPath.get(other)?.title ?? other;
+	const relation = edge.relation ?? "mentions";
+	return `  ${direction === "out" ? "→" : "←"} ${relation}  ${name}${other === void 0 ? "" : `  ${other}`}`;
+};
+var connections = (note, index) => {
+	const out = (index.outgoing.get(note.path) ?? []).map((edge) => arrow(edge, index, "out"));
+	const back = (index.backlinks.get(note.path) ?? []).map((edge) => arrow(edge, index, "in"));
+	return [...out.length === 0 ? [] : ["links to:", ...out], ...back.length === 0 ? [] : ["linked from:", ...back]];
+};
+var noteText = (note, index, body) => [
+	note.path,
+	[note.title, chips(note)].filter((part) => part !== "").join("  ·  "),
+	...factsOf(note).map(([key, values]) => `  ${key}: ${values.join(", ")}`),
+	...body ? [
+		"",
+		note.body.trim(),
+		""
+	] : [],
+	...connections(note, index)
+].join("\n");
+var noteJson = (note, index) => ({
+	path: note.path,
+	title: note.title,
+	type: note.type,
+	tags: note.tags,
+	aliases: note.aliases,
+	facts: Object.fromEntries(factsOf(note)),
+	body: note.body,
+	linksTo: (index.outgoing.get(note.path) ?? []).map((edge) => ({
+		relation: edge.relation,
+		target: edge.target,
+		path: edge.to
+	})),
+	linkedFrom: (index.backlinks.get(note.path) ?? []).map((edge) => ({
+		relation: edge.relation,
+		from: edge.from
+	})),
+	modifiedAt: note.modifiedAt
+});
+var out = (value) => {
+	process.stdout.write(`${value}\n`);
+};
+var emit = (run, json, text) => out(run.json ? JSON.stringify(json, void 0, 2) : text);
+var findNote = (index, name) => {
+	return index.resolve(name) ?? index.byPath.get(name) ?? {
+		missing: name,
+		near: search(index, {
+			query: name,
+			limit: 5
+		}).map((hit) => `${hit.title}  ${hit.path}`)
+	};
+};
+var isNote = (value) => !("missing" in value);
+var findVerb = (run, index) => {
+	const hits = search(index, {
+		query: run.args.positionals.join(" "),
+		type: flag(run.args, "type"),
+		tag: flag(run.args, "tag"),
+		linkedTo: flag(run.args, "linked-to"),
+		limit: number(run.args, "limit", 25)
+	});
+	if (hits.length === 0) {
+		emit(run, { hits: [] }, "nothing in the knowledge base matches.");
+		return 1;
+	}
+	emit(run, { hits }, hits.map((hit) => [
+		`${hit.path}`,
+		`  ${[hit.title, [hit.type, ...hit.tags.map((tag) => `#${tag}`)].filter(Boolean).join(" ")].filter(Boolean).join("  ·  ")}`,
+		hit.snippet === void 0 ? void 0 : `  ${hit.snippet}`
+	].filter((line) => line !== void 0).join("\n")).join("\n"));
+	return 0;
+};
+var readVerb = (run, index, withBody) => {
+	const name = run.args.positionals.join(" ");
+	if (name === "") {
+		emit(run, { error: "which note?" }, "which note? kb read <name>");
+		return 2;
+	}
+	const found = findNote(index, name);
+	if (!isNote(found)) {
+		emit(run, found, [`no note named "${found.missing}".`, ...found.near.length === 0 ? [] : ["closest:", ...found.near.map((line) => `  ${line}`)]].join("\n"));
+		return 1;
+	}
+	emit(run, noteJson(found, index), noteText(found, index, withBody));
+	return 0;
+};
+var graphVerb = (run, index) => {
+	const view = neighbourhood(index, run.args.positionals.join(" "), number(run.args, "depth", 2));
+	if (view.focus === void 0) {
+		emit(run, view, "no such note.");
+		return 1;
+	}
+	const depth = number(run.args, "depth", 2);
+	emit(run, view, [
+		`${view.nodes.length} notes within ${depth} ${depth === 1 ? "step" : "steps"} of ${view.focus}`,
+		"",
+		"notes:",
+		...view.nodes.map((node) => `  ${node.depth === 0 ? "" : `${"·".repeat(node.depth)} `}${node.title}${node.type === void 0 ? "" : `  (${node.type})`}  ${node.path}`),
+		"",
+		"connections:",
+		...view.edges.map((edge) => `  ${edge.from} —${edge.relation ?? "mentions"}→ ${edge.to}`),
+		...view.omitted === 0 ? [] : ["", `  … ${view.omitted} more neighbours not shown`]
+	].join("\n"));
+	return 0;
+};
+var brokenLine = (link) => `  ${link.from} → [[${link.target}]]${link.relation === void 0 ? "" : ` (${link.relation})`}`;
+var driftLine = (drift) => `  ${drift.word}  ×${drift.uses}  ${drift.notes.join(" ")}`;
+var section = (heading, lines) => lines.length === 0 ? [] : [
+	"",
+	heading,
+	...lines
+];
+var checkVerb = (run, index) => {
+	const report = overviewOf(index);
+	const body = [
+		...section(`links to notes nobody has written (${report.broken.length}):`, report.broken.map(brokenLine)),
+		...section(`notes nothing links to and which link to nothing (${report.orphans.length}):`, report.orphans.map((path) => `  ${path}`)),
+		...section(`notes with no type, invisible to every typed question (${report.untyped.length}):`, report.untyped.map((path) => `  ${path}`)),
+		...section(`kinds the vocabulary has not adopted:`, report.typeDrift.map(driftLine)),
+		...section(`relationships the vocabulary has not adopted:`, report.relationDrift.map(driftLine)),
+		...section(`headers this reader could not parse:`, report.unreadable.map((entry) => `  ${entry.path}  ${entry.keys.join(", ")}`)),
+		...section(`names that match more than one note:`, report.ambiguous.map((entry) => `  ${entry.name}  ${entry.notes.join(" ")}`))
+	];
+	const tally = `${report.noteCount} notes, ${report.linkCount} links.`;
+	emit(run, report, body.length === 0 ? `${tally} Nothing to fix.` : [tally, ...body].join("\n"));
+	return 0;
+};
+var vocabVerb = (run, index) => {
+	const { vocabulary } = index;
+	if (vocabulary.path === void 0) {
+		emit(run, vocabulary, `this knowledge base has adopted no vocabulary yet, write ${VOCABULARY_PATH} with type: ${VOCABULARY_TYPE} to start one.`);
+		return 1;
+	}
+	const note = index.byPath.get(vocabulary.path);
+	emit(run, vocabulary, [
+		`${vocabulary.path}`,
+		`kinds: ${vocabulary.types.join(", ")}`,
+		`relationships: ${vocabulary.relations.join(", ")}`,
+		"",
+		(note?.body ?? "").trim()
+	].join("\n"));
+	return 0;
+};
+var newVerb = async (run, index) => {
+	const title = run.args.positionals.join(" ").trim();
+	if (title === "") {
+		emit(run, { error: "what is it called?" }, `what is it called? kb new "Ada Lovelace" --type person`);
+		return 2;
+	}
+	const type = flag(run.args, "type");
+	const path = flag(run.args, "path") ?? `${type === void 0 ? "" : `${type}/`}${slugify(title)}.md`;
+	if (index.byPath.get(path) !== void 0) {
+		emit(run, {
+			error: "already there",
+			path
+		}, `${path} already exists, kb set, or pick another --path.`);
+		return 2;
+	}
+	const fields = new Map([
+		...type === void 0 ? [] : [["type", [type]]],
+		["title", [title]],
+		...flagAll(run.args, "tag").length === 0 ? [] : [["tags", [...flagAll(run.args, "tag")]]],
+		...linkFields(flagAll(run.args, "link"))
+	]);
+	const body = flag(run.args, "body") ?? "";
+	if (!await writeNote(run.root, path, formatFrontmatter(fields, body === "" ? "" : `${body}\n`))) {
+		emit(run, {
+			error: "bad path",
+			path
+		}, `${path} is not a markdown file inside the knowledge base.`);
+		return 2;
+	}
+	emit(run, {
+		path,
+		title,
+		type
+	}, `wrote ${path}`);
+	return 0;
+};
+var writeField = async (run, index, name, field, values) => {
+	const found = findNote(index, name);
+	if (!isNote(found)) {
+		emit(run, found, `no note named "${found.missing}".`);
+		return 1;
+	}
+	const fields = new Map(found.fields);
+	if (values.length === 0) fields.delete(field);
+	else fields.set(field, values);
+	if (!await writeNote(run.root, found.path, formatFrontmatter(fields, found.body))) {
+		emit(run, {
+			error: "bad path",
+			path: found.path
+		}, `${found.path} is not writable as a note.`);
+		return 2;
+	}
+	emit(run, {
+		path: found.path,
+		field,
+		values
+	}, `${found.path}  ${field}: ${values.length === 0 ? "(cleared)" : values.join(", ")}`);
+	return 0;
+};
+var setVerb = async (run, index) => {
+	const [name, field, ...values] = run.args.positionals;
+	if (name === void 0 || field === void 0) {
+		emit(run, { error: "usage" }, `kb set <name> <field> [value…]`);
+		return 2;
+	}
+	return writeField(run, index, name, field, values);
+};
+var linkVerb = async (run, index) => {
+	const [name, relation, ...targets] = run.args.positionals;
+	if (name === void 0 || relation === void 0 || targets.length === 0) {
+		emit(run, { error: "usage" }, `kb link <name> <relationship> <other note…>`);
+		return 2;
+	}
+	const found = findNote(index, name);
+	if (!isNote(found)) {
+		emit(run, found, `no note named "${found.missing}".`);
+		return 1;
+	}
+	const wanted = targets.map((target) => wikiLink(index.resolve(target)?.title ?? target));
+	const merged = [.../* @__PURE__ */ new Set([...found.fields.get(relation) ?? [], ...wanted])];
+	return writeField(run, index, found.path, relation, merged);
+};
+var workspaceRoot = () => process.env["WORKSPACE_ROOT"] ?? "/work";
+var main = async () => {
+	const args = parseArgs(process.argv.slice(2));
+	if (args.verb === "" || args.verb === "help" || has(args, "help")) {
+		out(USAGE);
+		return args.verb === "" && !has(args, "help") ? 2 : 0;
+	}
+	const workspace = workspaceRoot();
+	const root = knowledgeRoot(workspace, process.env["KB_FOLDER"] ?? await configuredFolder(workspace));
+	const run = {
+		args,
+		root,
+		json: has(args, "json")
+	};
+	const files = await readNotes(root);
+	if (files.length === 0 && args.verb !== "new") {
+		emit(run, {
+			folder: root,
+			notes: 0
+		}, `no notes yet in ${root}, kb new "Something" --type term starts one.`);
+		return 1;
+	}
+	const index = buildIndex(files);
+	switch (args.verb) {
+		case "find":
+		case "search": return findVerb(run, index);
+		case "list": return findVerb({
+			...run,
+			args: {
+				...args,
+				positionals: []
+			}
+		}, index);
+		case "read":
+		case "note": return readVerb(run, index, true);
+		case "links": return readVerb(run, index, false);
+		case "graph": return graphVerb(run, index);
+		case "check": return checkVerb(run, index);
+		case "vocab": return vocabVerb(run, index);
+		case "new": return newVerb(run, index);
+		case "set": return setVerb(run, index);
+		case "link": return linkVerb(run, index);
+		default:
+			out(`kb: no verb "${args.verb}".\n\n${USAGE}`);
+			return 2;
+	}
+};
+main().then((code) => {
+	process.exitCode = code;
+}, (error) => {
+	process.stderr.write(`kb: ${errorMessage(error)}\n`);
+	process.exitCode = 2;
+});
+//#endregion
+export {};

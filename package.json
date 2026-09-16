@@ -1,0 +1,37 @@
+{
+    "name": "intentic-knowledge",
+    "version": "1.0.0",
+    "description": "Knowledge, a markdown folder that is also a typed graph: the owner's notes, entities and relationships, browsable here and queryable by the agent",
+    "license": "MIT",
+    "private": true,
+    "type": "module",
+    "packageManager": "pnpm@12.4.1",
+    "scripts": {
+        "build": "vite build && vite build --config vite.server.config.ts && vite build --config vite.kb.config.ts && vite build --config vite.obsidian.config.ts && chmod +x dist/bin/kb dist/bin/obsidian",
+        "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+        "test": "vitest run && node --test test/*.test.mjs",
+        "verify": "pnpm run build && pnpm run typecheck && pnpm run test"
+    },
+    "dependencies": {
+        "@intentic/base": "^1.281.0",
+        "@intentic/extension-api": "^1.281.0",
+        "@intentic/extension-ui": "^1.281.0",
+        "@intentic/sandbox-contract": "^1.281.0",
+        "@orpc/contract": "^1.14.13",
+        "@orpc/openapi": "^1.14.13",
+        "@orpc/server": "^1.14.13",
+        "zod": "^4.5.4"
+    },
+    "devDependencies": {
+        "@intentic/extension-manifest": "^1.281.0",
+        "@tanstack/vue-query": "^5.101.4",
+        "@types/node": "^24.13.2",
+        "@vitejs/plugin-vue": "^6.0.8",
+        "jsdom": "^29.1.1",
+        "typescript": "^5.9.3",
+        "vite": "^8.2.0",
+        "vitest": "^4.1.10",
+        "vue": "^3.5.40",
+        "vue-tsc": "^3.3.9"
+    }
+}

@@ -1,0 +1,1019 @@
+#!/usr/bin/env node
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve, sep } from "node:path";
+//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@intentic+base@1.281.0/node_modules/@intentic/base/dist/errors.js
+var errorMessage = (error) => error instanceof Error ? error.message : String(error);
+//#endregion
+//#region src/notes/frontmatter.ts
+var FRONTMATTER = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
+var scalar = (raw) => {
+	const value = raw.trim();
+	return ((/^"(.*)"$/s.exec(value) ?? /^'(.*)'$/s.exec(value))?.[1] ?? value).trim();
+};
+var flowItems = (inner) => {
+	const items = [];
+	let current = "";
+	let quote;
+	for (const char of inner) if (quote !== void 0) {
+		if (char === quote) quote = void 0;
+		current += char;
+	} else if (char === "\"" || char === "'") {
+		quote = char;
+		current += char;
+	} else if (char === ",") {
+		items.push(current);
+		current = "";
+	} else current += char;
+	items.push(current);
+	return items.map(scalar).filter((item) => item !== "");
+};
+var KEY_NAME = /^[A-Za-z_][\w.-]*$/;
+var keyLine = (line) => {
+	const colon = line.indexOf(":");
+	if (colon === -1) return;
+	let nameEnd = colon;
+	while (line[nameEnd - 1] === " " || line[nameEnd - 1] === "	") nameEnd--;
+	const name = line.slice(0, nameEnd);
+	return KEY_NAME.test(name) ? [name, line.slice(colon + 1).trim()] : void 0;
+};
+var blockItem = (line) => {
+	let dash = 0;
+	while (line[dash] === " " || line[dash] === "	") dash++;
+	if (dash === 0 || line[dash] !== "-") return;
+	let valueStart = dash + 1;
+	while (line[valueStart] === " " || line[valueStart] === "	") valueStart++;
+	return line.slice(valueStart);
+};
+var parseFrontmatter = (content) => {
+	const match = FRONTMATTER.exec(content);
+	if (match === null) return {
+		fields: /* @__PURE__ */ new Map(),
+		unreadable: [],
+		body: content,
+		present: false
+	};
+	const fields = /* @__PURE__ */ new Map();
+	const unreadable = [];
+	const lines = (match[1] ?? "").split(/\r?\n/);
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i] ?? "";
+		if (line.trim() === "" || line.trimStart().startsWith("#") || /^[ \t]/.test(line)) continue;
+		const key = keyLine(line);
+		if (key === void 0) continue;
+		const [name, inline] = key;
+		const flow = /^\[(.*)\]$/s.exec(inline);
+		if (flow !== null) {
+			fields.set(name, flowItems(flow[1] ?? ""));
+			continue;
+		}
+		if (inline !== "") {
+			fields.set(name, [scalar(inline)]);
+			continue;
+		}
+		const items = [];
+		let j = i + 1;
+		for (; j < lines.length; j++) {
+			const next = lines[j] ?? "";
+			if (next.trim() === "") continue;
+			const item = blockItem(next);
+			if (item === void 0) break;
+			const value = scalar(item);
+			if (value !== "") items.push(value);
+		}
+		if (items.length > 0) fields.set(name, items);
+		else unreadable.push(name);
+		i = j - 1;
+	}
+	return {
+		fields,
+		unreadable,
+		body: content.slice(match[0].length),
+		present: true
+	};
+};
+var needsQuotes = (value) => value === "" || /^[[\-#&*!|>%@`'"]/.test(value) || /:\s|\s#|^\s|\s$/.test(value);
+var emit$1 = (value) => needsQuotes(value) ? `"${value.replace(/(["\\])/g, "\\$1")}"` : value;
+var formatFrontmatter = (fields, body) => {
+	const lines = [];
+	for (const [key, values] of fields) {
+		if (values.length === 0) continue;
+		lines.push(values.length === 1 ? `${key}: ${emit$1(values[0] ?? "")}` : `${key}: [${values.map(emit$1).join(", ")}]`);
+	}
+	return `---\n${lines.join("\n")}\n---\n${body.replace(/^\n+/, "")}`;
+};
+//#endregion
+//#region src/notes/wiki-links.ts
+var wikiLinksIn = (text) => {
+	const links = [];
+	let cursor = 0;
+	while (cursor < text.length) {
+		const start = text.indexOf("[[", cursor);
+		if (start === -1) break;
+		const close = text.indexOf("]]", start + 2);
+		if (close === -1) break;
+		const value = text.slice(start + 2, close);
+		const separator = value.indexOf("|");
+		const target = separator === -1 ? value : value.slice(0, separator);
+		const label = separator === -1 ? void 0 : value.slice(separator + 1);
+		if (target !== "" && !target.includes("[") && !target.includes("]") && label !== "" && !label?.includes("]")) links.push({
+			start,
+			end: close + 2,
+			target,
+			label
+		});
+		cursor = close + 2;
+	}
+	return links;
+};
+//#endregion
+//#region src/notes/note.ts
+var RESERVED = /* @__PURE__ */ new Set([
+	"type",
+	"title",
+	"aliases",
+	"tags",
+	"created",
+	"updated",
+	"types",
+	"relations"
+]);
+var INLINE_TAG = /(?:^|\s)#([a-z0-9][\w/-]*)/giu;
+var slugOf = (path) => path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/i, "");
+var titleFromSlug = (slug) => {
+	const words = slug.replace(/[-_]+/g, " ").trim();
+	return words === "" ? slug : words.charAt(0).toUpperCase() + words.slice(1);
+};
+var firstHeading = (body) => {
+	for (const line of body.split(/\r?\n/)) {
+		if (!line.startsWith("#")) continue;
+		let textStart = 1;
+		while (line[textStart] === " " || line[textStart] === "	") textStart++;
+		if (textStart > 1) {
+			const heading = line.slice(textStart).trim();
+			if (heading !== "") return heading;
+		}
+	}
+};
+var linksIn = (text, relation) => {
+	const links = [];
+	for (const match of wikiLinksIn(text)) {
+		const target = match.target.trim();
+		if (target !== "") links.push({
+			target,
+			label: match.label?.trim(),
+			relation
+		});
+	}
+	return links;
+};
+var withoutCode = (body) => body.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, "");
+var parseNote = (file) => {
+	const { fields, unreadable, body } = parseFrontmatter(file.content);
+	const prose = withoutCode(body);
+	const links = [...[...fields].flatMap(([key, values]) => RESERVED.has(key) ? [] : values.flatMap((value) => linksIn(value, key))), ...linksIn(prose, void 0)];
+	const inlineTags = [...prose.matchAll(INLINE_TAG)].map((match) => (match[1] ?? "").toLowerCase());
+	const slug = slugOf(file.path);
+	return {
+		path: file.path,
+		slug,
+		title: fields.get("title")?.[0] ?? firstHeading(body) ?? titleFromSlug(slug),
+		type: fields.get("type")?.[0],
+		aliases: fields.get("aliases") ?? [],
+		tags: [.../* @__PURE__ */ new Set([...(fields.get("tags") ?? []).map((tag) => tag.replace(/^#/, "").toLowerCase()), ...inlineTags])],
+		fields,
+		unreadable,
+		links,
+		body,
+		content: file.content,
+		modifiedAt: file.modifiedAt,
+		sizeBytes: file.sizeBytes
+	};
+};
+var factsOf = (note) => [...note.fields].filter(([key, values]) => !RESERVED.has(key) && !values.some((value) => value.includes("[[")));
+//#endregion
+//#region src/notes/vocabulary.ts
+var VOCABULARY_TYPE = "vocabulary";
+var EMPTY_VOCABULARY = {
+	types: [],
+	relations: [],
+	path: void 0
+};
+var readVocabulary = (notes) => {
+	const note = notes.find((candidate) => candidate.type === VOCABULARY_TYPE);
+	if (note === void 0) return EMPTY_VOCABULARY;
+	return {
+		types: note.fields.get("types") ?? [],
+		relations: note.fields.get("relations") ?? [],
+		path: note.path
+	};
+};
+//#endregion
+//#region src/notes/index-notes.ts
+var normalise = (value) => value.trim().toLowerCase();
+var pathKeys = (path) => {
+	const withoutExtension = path.replace(/\.md$/i, "");
+	return [normalise(path), normalise(withoutExtension)];
+};
+var buildLookup = (notes) => {
+	const lookup = /* @__PURE__ */ new Map();
+	const ambiguous = /* @__PURE__ */ new Map();
+	const passes = [
+		(note) => pathKeys(note.path),
+		(note) => [normalise(note.slug)],
+		(note) => [normalise(note.title)],
+		(note) => note.aliases.map(normalise)
+	];
+	for (const keysOf of passes) {
+		const claimed = /* @__PURE__ */ new Map();
+		for (const note of notes) for (const key of keysOf(note)) {
+			if (key === "") continue;
+			const held = claimed.get(key);
+			if (held === void 0) claimed.set(key, note);
+			else if (held !== note) ambiguous.set(key, [.../* @__PURE__ */ new Set([...ambiguous.get(key) ?? [held.path], note.path])]);
+		}
+		for (const [key, note] of claimed) if (!lookup.has(key)) lookup.set(key, note);
+	}
+	return {
+		lookup,
+		ambiguous
+	};
+};
+var buildIndex = (files) => {
+	const notes = files.map(parseNote).toSorted((a, b) => a.path.localeCompare(b.path));
+	const { lookup, ambiguous } = buildLookup(notes);
+	const resolve = (target) => {
+		const key = normalise(target.split("#")[0] ?? target);
+		return lookup.get(key) ?? lookup.get(key.replace(/\.md$/i, ""));
+	};
+	const edges = notes.flatMap((note) => note.links.map((link) => ({
+		from: note.path,
+		to: resolve(link.target)?.path,
+		target: link.target,
+		relation: link.relation
+	})));
+	const backlinks = /* @__PURE__ */ new Map();
+	const outgoing = /* @__PURE__ */ new Map();
+	for (const edge of edges) {
+		outgoing.set(edge.from, [...outgoing.get(edge.from) ?? [], edge]);
+		if (edge.to !== void 0 && edge.to !== edge.from) backlinks.set(edge.to, [...backlinks.get(edge.to) ?? [], edge]);
+	}
+	return {
+		notes,
+		byPath: new Map(notes.map((note) => [note.path, note])),
+		edges,
+		backlinks,
+		outgoing,
+		vocabulary: readVocabulary(notes),
+		ambiguous,
+		resolve
+	};
+};
+//#endregion
+//#region src/notes/query.ts
+var DEFAULT_LIMIT = 50;
+var TITLE_EXACT = 1e3;
+var ALIAS_EXACT = 900;
+var TITLE_PREFIX = 700;
+var TITLE_CONTAINS = 500;
+var TAG_OR_TYPE = 300;
+var FIELD = 200;
+var BODY = 100;
+var withoutWikiMarkers = (line) => {
+	const plain = [];
+	let cursor = 0;
+	for (const link of wikiLinksIn(line)) {
+		plain.push(line.slice(cursor, link.start), (link.label ?? link.target).trim());
+		cursor = link.end;
+	}
+	plain.push(line.slice(cursor));
+	return plain.join("");
+};
+var plainly = (line) => withoutWikiMarkers(line).replace(/`([^`]*)`/g, "$1").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/(^|\s)[*_]([^*_]+)[*_](?=\s|$|[.,;:!?])/g, "$1$2").replace(/^#{1,6}\s+/, "").replace(/^[-*+]\s+/, "").trim();
+var bodyHit = (note, needle) => {
+	const lines = note.body.split(/\r?\n/);
+	let hits = 0;
+	let line;
+	for (const candidate of lines) if (candidate.toLowerCase().includes(needle)) {
+		hits++;
+		line ??= plainly(candidate);
+	}
+	return {
+		hits,
+		line
+	};
+};
+var scoreNote = (note, needle) => {
+	const title = note.title.toLowerCase();
+	if (title === needle || note.slug.toLowerCase() === needle) return {
+		score: TITLE_EXACT,
+		matched: "title",
+		snippet: void 0
+	};
+	if (note.aliases.some((alias) => alias.toLowerCase() === needle)) return {
+		score: ALIAS_EXACT,
+		matched: "alias",
+		snippet: void 0
+	};
+	if (title.startsWith(needle)) return {
+		score: TITLE_PREFIX,
+		matched: "title",
+		snippet: void 0
+	};
+	if (title.includes(needle) || note.slug.toLowerCase().includes(needle)) return {
+		score: TITLE_CONTAINS,
+		matched: "title",
+		snippet: void 0
+	};
+	if (note.tags.includes(needle) || note.type?.toLowerCase() === needle) return {
+		score: TAG_OR_TYPE,
+		matched: note.tags.includes(needle) ? "tag" : "type",
+		snippet: void 0
+	};
+	for (const [key, values] of factsOf(note)) {
+		const value = values.find((candidate) => candidate.toLowerCase().includes(needle));
+		if (value !== void 0) return {
+			score: FIELD,
+			matched: "field",
+			snippet: `${key}: ${value}`
+		};
+	}
+	const { hits, line } = bodyHit(note, needle);
+	return hits === 0 ? void 0 : {
+		score: BODY + Math.min(hits, 8),
+		matched: "body",
+		snippet: line
+	};
+};
+var search = (index, filters) => {
+	const needle = filters.query?.trim().toLowerCase() ?? "";
+	const linkedTo = filters.linkedTo === void 0 ? void 0 : index.resolve(filters.linkedTo)?.path;
+	const linked = linkedTo === void 0 ? void 0 : new Set((index.backlinks.get(linkedTo) ?? []).map((edge) => edge.from));
+	const hits = [];
+	for (const note of index.notes) {
+		if (filters.type !== void 0 && note.type?.toLowerCase() !== filters.type.toLowerCase()) continue;
+		if (filters.tag !== void 0 && !note.tags.includes(filters.tag.toLowerCase())) continue;
+		if (linked !== void 0 && !linked.has(note.path)) continue;
+		const scored = needle === "" ? {
+			score: 0,
+			matched: "all",
+			snippet: void 0
+		} : scoreNote(note, needle);
+		if (scored === void 0) continue;
+		hits.push({
+			path: note.path,
+			title: note.title,
+			type: note.type,
+			tags: note.tags,
+			modifiedAt: note.modifiedAt,
+			matched: scored.matched,
+			snippet: scored.snippet,
+			score: scored.score
+		});
+	}
+	return hits.toSorted((a, b) => b.score - a.score || b.modifiedAt - a.modifiedAt || a.path.localeCompare(b.path)).slice(0, filters.limit ?? DEFAULT_LIMIT);
+};
+//#endregion
+//#region src/notes/read-notes.ts
+var DEFAULT_FOLDER = "knowledge";
+var SKIP_DIRS$1 = /* @__PURE__ */ new Set([
+	".git",
+	".obsidian",
+	".trash",
+	".intentic",
+	"node_modules",
+	".cache"
+]);
+var knowledgeRoot = (workspaceRoot, configured) => {
+	const folder = configured?.trim();
+	if (folder === void 0 || folder === "" || folder.split("/").includes("..") || folder.startsWith("/")) return join(workspaceRoot, DEFAULT_FOLDER);
+	return join(workspaceRoot, folder);
+};
+var configuredFolder = async (workspaceRoot) => {
+	try {
+		const value = JSON.parse(await readFile(join(workspaceRoot, ".intentic/config/extension-settings.json"), "utf8"))["intentic.knowledge"]?.["folder"];
+		return typeof value === "string" ? value : void 0;
+	} catch {
+		return;
+	}
+};
+var resolveWithin = (dir, relPath) => {
+	const base = resolve(dir);
+	const target = resolve(base, relPath);
+	const rel = relative(base, target);
+	return rel === "" || rel === ".." || rel.startsWith(`..${sep}`) ? void 0 : target;
+};
+var resolveNote = (root, name) => {
+	const target = resolveWithin(root, name);
+	return target === void 0 || !target.toLowerCase().endsWith(".md") ? void 0 : target;
+};
+var readNotes = async (root) => {
+	const files = [];
+	const walk = async (dir) => {
+		let entries;
+		try {
+			entries = await readdir(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		await Promise.all(entries.map(async (entry) => {
+			const full = join(dir, entry.name);
+			if (entry.isDirectory()) {
+				if (!SKIP_DIRS$1.has(entry.name)) await walk(full);
+				return;
+			}
+			if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".md")) return;
+			try {
+				const [content, info] = await Promise.all([readFile(full, "utf8"), stat(full)]);
+				files.push({
+					path: relative(root, full).split(sep).join("/"),
+					content,
+					modifiedAt: Math.round(info.mtimeMs),
+					sizeBytes: info.size
+				});
+			} catch {}
+		}));
+	};
+	await walk(root);
+	return files;
+};
+var writeNote = async (root, name, content) => {
+	const target = resolveNote(root, name);
+	if (target === void 0) return false;
+	await mkdir(dirname(target), { recursive: true });
+	await writeFile(target, content);
+	return true;
+};
+//#endregion
+//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@intentic+sandbox-contract@1.281.0/node_modules/@intentic/sandbox-contract/dist/policy/capability-env.js
+var envSuffix = (id) => id.toUpperCase().replaceAll("-", "_");
+//#endregion
+//#region src/obsidian/connection.ts
+var URL_KEY = /^OBSIDIAN_URL_(.+)$/;
+var value = (env, key, suffix) => (env[`${key}_${suffix}`] ?? "").trim();
+var normaliseUrl = (raw) => {
+	const trimmed = raw.trim().replace(/\/+$/, "");
+	if (trimmed === "") return "";
+	return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+};
+var connectionOf = (name, fields) => {
+	const url = normaliseUrl(fields.url);
+	const problem = url === "" ? "no Local REST API URL on the card" : fields.apiKey === "" ? "no API key on the card: copy it from Obsidian ▸ Settings ▸ Local REST API" : void 0;
+	return {
+		name,
+		url,
+		apiKey: fields.apiKey,
+		write: fields.write.toLowerCase() === "on",
+		folder: fields.folder.replace(/^\/+|\/+$/g, ""),
+		problem
+	};
+};
+var vaultConnections = (env) => {
+	const found = [];
+	for (const key of Object.keys(env)) {
+		const suffix = URL_KEY.exec(key)?.[1];
+		if (suffix === void 0) continue;
+		found.push(connectionOf(suffix.toLowerCase(), {
+			url: value(env, "OBSIDIAN_URL", suffix),
+			apiKey: value(env, "OBSIDIAN_API_KEY", suffix),
+			write: value(env, "OBSIDIAN_WRITE", suffix),
+			folder: value(env, "OBSIDIAN_FOLDER", suffix)
+		}));
+	}
+	return found.toSorted((a, b) => a.name.localeCompare(b.name));
+};
+var selectVault = (connections, wanted) => {
+	if (connections.length === 0) return { error: `no Obsidian vault is connected, add the Obsidian card in Capabilities.` };
+	if (wanted === void 0) {
+		const [only] = connections;
+		return connections.length === 1 && only !== void 0 ? { vault: only } : { error: `which vault? --vault ${connections.map((connection) => connection.name).join(" | ")}` };
+	}
+	const suffix = envSuffix(wanted);
+	const match = connections.find((connection) => envSuffix(connection.name) === suffix);
+	return match === void 0 ? { error: `no connected vault named "${wanted}", have: ${connections.map((connection) => connection.name).join(", ")}` } : { vault: match };
+};
+//#endregion
+//#region src/obsidian/rest.ts
+var isVaultError = (value) => typeof value === "object" && value !== null && "error" in value;
+var relaxTlsFor = (url, env) => {
+	if (url.toLowerCase().startsWith("https://")) env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0";
+};
+var encodeVaultPath = (path) => path.split("/").filter((segment) => segment !== "").map((segment) => encodeURIComponent(segment)).join("/");
+var describe = (status, path) => {
+	switch (status) {
+		case 401:
+		case 403: return "the API key was refused: copy it again from Obsidian ▸ Settings ▸ Local REST API";
+		case 404: return `the vault has nothing at "${path}"`;
+		case 405: return `the vault refused that operation on "${path}"`;
+		default: return `the vault answered ${status}`;
+	}
+};
+var vaultCall = async (vault, call) => {
+	if (vault.problem !== void 0) return { error: vault.problem };
+	let response;
+	try {
+		response = await fetch(`${vault.url}${call.path}`, {
+			method: call.method,
+			headers: {
+				authorization: `Bearer ${vault.apiKey}`,
+				...call.contentType === void 0 ? {} : { "content-type": call.contentType },
+				...call.accept === void 0 ? {} : { accept: call.accept }
+			},
+			body: call.body
+		});
+	} catch (error) {
+		return { error: [
+			`couldn't reach Obsidian at ${vault.url} (${errorMessage(error)}).`,
+			"Obsidian has to be OPEN on that machine with the Local REST API plugin enabled.",
+			"From a sandbox the address is host.docker.internal, never localhost."
+		].join(" ") };
+	}
+	if (!response.ok) return {
+		error: describe(response.status, call.path),
+		status: response.status
+	};
+	return await response.text();
+};
+var json = async (vault, call) => {
+	const raw = await vaultCall(vault, call);
+	if (isVaultError(raw)) return raw;
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return { error: `the vault answered something that isn't JSON: ${raw.slice(0, 120)}` };
+	}
+};
+var vaultInfo = async (vault) => await json(vault, {
+	method: "GET",
+	path: "/"
+});
+var vaultList = async (vault, folder) => {
+	const encoded = encodeVaultPath(folder);
+	const result = await json(vault, {
+		method: "GET",
+		path: `/vault/${encoded === "" ? "" : `${encoded}/`}`
+	});
+	return isVaultError(result) ? result : result.files ?? [];
+};
+var vaultRead = async (vault, file) => await vaultCall(vault, {
+	method: "GET",
+	path: `/vault/${encodeVaultPath(file)}`,
+	accept: "text/markdown"
+});
+var vaultWrite = async (vault, file, content) => {
+	const result = await vaultCall(vault, {
+		method: "PUT",
+		path: `/vault/${encodeVaultPath(file)}`,
+		body: content,
+		contentType: "text/markdown"
+	});
+	return isVaultError(result) ? result : void 0;
+};
+var vaultAppend = async (vault, file, content) => {
+	const result = await vaultCall(vault, {
+		method: "POST",
+		path: `/vault/${encodeVaultPath(file)}`,
+		body: content,
+		contentType: "text/markdown"
+	});
+	return isVaultError(result) ? result : void 0;
+};
+var vaultDelete = async (vault, file) => {
+	const result = await vaultCall(vault, {
+		method: "DELETE",
+		path: `/vault/${encodeVaultPath(file)}`
+	});
+	return isVaultError(result) ? result : void 0;
+};
+var vaultOpen = async (vault, file) => {
+	const result = await vaultCall(vault, {
+		method: "POST",
+		path: `/open/${encodeVaultPath(file)}`
+	});
+	return isVaultError(result) ? result : void 0;
+};
+var vaultSearch = async (vault, query, contextLength) => {
+	const result = await json(vault, {
+		method: "POST",
+		path: `/search/simple/?query=${encodeURIComponent(query)}&contextLength=${contextLength}`
+	});
+	return isVaultError(result) ? result : result;
+};
+var SKIP_DIRS = /* @__PURE__ */ new Set([
+	".obsidian",
+	".trash",
+	".git"
+]);
+var vaultWalk = async (vault, folder = "") => {
+	const found = [];
+	const queue = [folder];
+	while (queue.length > 0) {
+		const dir = queue.shift() ?? "";
+		const entries = await vaultList(vault, dir);
+		if (isVaultError(entries)) {
+			if (dir === folder) return entries;
+			continue;
+		}
+		for (const entry of entries) {
+			const path = dir === "" ? entry : `${dir}/${entry}`;
+			if (entry.endsWith("/")) {
+				if (!SKIP_DIRS.has(entry.replace(/\/$/, ""))) queue.push(path.replace(/\/$/, ""));
+				continue;
+			}
+			if (entry.toLowerCase().endsWith(".md")) found.push(path);
+		}
+	}
+	return found.toSorted((a, b) => a.localeCompare(b));
+};
+//#endregion
+//#region src/cli/args.ts
+var SWITCHES = /* @__PURE__ */ new Set([
+	"json",
+	"help",
+	"all"
+]);
+var parseArgs = (argv) => {
+	const positionals = [];
+	const flags = /* @__PURE__ */ new Map();
+	const push = (name, value) => {
+		flags.set(name, [...flags.get(name) ?? [], value]);
+	};
+	for (let i = 0; i < argv.length; i++) {
+		const arg = argv[i] ?? "";
+		if (!arg.startsWith("--")) {
+			positionals.push(arg);
+			continue;
+		}
+		const [name, inline] = (() => {
+			const cut = arg.indexOf("=");
+			return cut === -1 ? [arg.slice(2), void 0] : [arg.slice(2, cut), arg.slice(cut + 1)];
+		})();
+		if (SWITCHES.has(name)) {
+			push(name, inline ?? "true");
+			continue;
+		}
+		if (inline !== void 0) {
+			push(name, inline);
+			continue;
+		}
+		const next = argv[i + 1];
+		if (next === void 0 || next.startsWith("--")) {
+			push(name, "");
+			continue;
+		}
+		push(name, next);
+		i++;
+	}
+	return {
+		verb: positionals[0] ?? "",
+		positionals: positionals.slice(1),
+		flags
+	};
+};
+var flag = (args, name) => {
+	const last = args.flags.get(name)?.at(-1);
+	return last === void 0 || last === "" ? void 0 : last;
+};
+var flagAll = (args, name) => (args.flags.get(name) ?? []).filter((value) => value !== "");
+var has = (args, name) => args.flags.has(name);
+var number = (args, name, fallback) => {
+	const parsed = Number(flag(args, name));
+	return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+};
+//#endregion
+//#region src/cli/note-shape.ts
+var linkFields = (pairs) => {
+	const fields = /* @__PURE__ */ new Map();
+	for (const pair of pairs) {
+		const cut = pair.indexOf("=");
+		if (cut <= 0) continue;
+		const relation = pair.slice(0, cut).trim();
+		const target = pair.slice(cut + 1).trim();
+		if (relation === "" || target === "") continue;
+		fields.set(relation, [...fields.get(relation) ?? [], wikiLink(target)]);
+	}
+	return fields;
+};
+var wikiLink = (target) => target.startsWith("[[") ? target : `[[${target}]]`;
+var slugify = (title) => title.toLowerCase().normalize("NFKD").replace(/[^\w\s-]/g, "").trim().replace(/[\s_]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "note";
+//#endregion
+//#region src/cli/obsidian.ts
+var USAGE = `obsidian: your Obsidian vault, live, through its Local REST API.
+
+  obsidian status                is the vault reachable, and may I write to it
+  obsidian vaults                every connected vault, by the name --vault takes
+  obsidian ls [folder]           the markdown files in the vault
+  obsidian read <file>           one note: its facts, its links, its text
+  obsidian find <words…>         search the vault                    [--limit --context]
+  obsidian open <file>           bring it to the front in Obsidian
+
+  obsidian write <file> --body … write a note                        [--type --tag --link rel=target --title]
+  obsidian append <file> --body … add to the end of a note
+  obsidian rm <file>             delete a note
+
+  obsidian pull <file…> | --all  copy vault notes into this workspace's knowledge folder   [--into]
+  obsidian push <name…>          copy knowledge notes into the vault                       [--into]
+
+pull and push are the bridge to \`kb\`: a note that crosses keeps its header, its tags and its [[links]], so
+whichever side it lands on can read it. Writing to the vault needs the card's write switch on; pulling never
+does, since it only writes here.
+
+Add --json to any of these. --vault <name> picks one when more than one is connected.`;
+var out = (value) => {
+	process.stdout.write(`${value}\n`);
+};
+var emit = (run, json, text) => out(run.json ? JSON.stringify(json, void 0, 2) : text);
+var fail = (run, message, code = 2) => {
+	emit(run, { error: message }, `obsidian: ${message}`);
+	return code;
+};
+var asNote = (path, content) => parseNote({
+	path,
+	content,
+	modifiedAt: 0,
+	sizeBytes: content.length
+});
+var chips = (note) => [note.type, ...note.tags.map((tag) => `#${tag}`)].filter((chip) => chip !== void 0 && chip !== "").join(" ");
+var noteText = (note, body) => [
+	note.path,
+	[note.title, chips(note)].filter((part) => part !== "").join("  ·  "),
+	...factsOf(note).map(([key, values]) => `  ${key}: ${values.join(", ")}`),
+	...note.links.length === 0 ? [] : ["links to:", ...note.links.map((link) => `  → ${link.relation ?? "mentions"}  ${link.target}`)],
+	...body ? ["", note.body.trim()] : []
+].join("\n");
+var noteJson = (note) => ({
+	path: note.path,
+	title: note.title,
+	type: note.type,
+	tags: note.tags,
+	aliases: note.aliases,
+	facts: Object.fromEntries(factsOf(note)),
+	links: note.links.map((link) => ({
+		relation: link.relation,
+		target: link.target
+	})),
+	body: note.body
+});
+var vaultPath = (run, name) => {
+	const into = flag(run.args, "into") ?? run.vault.folder;
+	const withExtension = name.toLowerCase().endsWith(".md") ? name : `${name}.md`;
+	if (withExtension.includes("/") || into === "") return withExtension.replace(/^\/+/, "");
+	return `${into}/${withExtension}`;
+};
+var statusVerb = async (run) => {
+	const info = await vaultInfo(run.vault);
+	if (isVaultError(info)) {
+		emit(run, {
+			vault: run.vault.name,
+			url: run.vault.url,
+			reachable: false,
+			...info
+		}, `obsidian: ${info.error}`);
+		return 2;
+	}
+	emit(run, {
+		vault: run.vault.name,
+		url: run.vault.url,
+		reachable: true,
+		authenticated: info.authenticated ?? true,
+		writable: run.vault.write
+	}, [
+		`${run.vault.name}  ${run.vault.url}`,
+		`  reachable, ${info.authenticated === false ? "but the key was refused" : "key accepted"}`,
+		`  ${run.vault.write ? "writing is allowed" : "READ ONLY, turn the write switch on in the Obsidian card to change that"}`,
+		`  new notes go to ${run.vault.folder === "" ? "the vault root" : run.vault.folder}`
+	].join("\n"));
+	return 0;
+};
+var lsVerb = async (run) => {
+	const files = await vaultWalk(run.vault, (run.args.positionals[0] ?? "").replace(/^\/+|\/+$/g, ""));
+	if (isVaultError(files)) return fail(run, files.error);
+	if (files.length === 0) {
+		emit(run, { files: [] }, "no markdown files there.");
+		return 1;
+	}
+	emit(run, { files }, files.join("\n"));
+	return 0;
+};
+var readVerb = async (run) => {
+	const name = run.args.positionals.join(" ");
+	if (name === "") return fail(run, "which note? obsidian read <file>");
+	const path = name.toLowerCase().endsWith(".md") ? name : `${name}.md`;
+	const content = await vaultRead(run.vault, path);
+	if (isVaultError(content)) return fail(run, content.error, content.status === 404 ? 1 : 2);
+	const note = asNote(path, content);
+	emit(run, noteJson(note), noteText(note, true));
+	return 0;
+};
+var findVerb = async (run) => {
+	const query = run.args.positionals.join(" ");
+	if (query === "") return fail(run, "what for? obsidian find <words…>");
+	const hits = await vaultSearch(run.vault, query, number(run.args, "context", 120));
+	if (isVaultError(hits)) return fail(run, hits.error);
+	const limited = hits.slice(0, number(run.args, "limit", 25));
+	if (limited.length === 0) {
+		emit(run, { hits: [] }, "nothing in the vault matches.");
+		return 1;
+	}
+	emit(run, { hits: limited }, limited.map((hit) => [hit.filename, ...(hit.matches ?? []).slice(0, 3).flatMap((match) => match.context === void 0 ? [] : [`  ${match.context.replaceAll("\n", " ").trim()}`])].join("\n")).join("\n"));
+	return 0;
+};
+var openVerb = async (run) => {
+	const name = run.args.positionals.join(" ");
+	if (name === "") return fail(run, "which note? obsidian open <file>");
+	const path = name.toLowerCase().endsWith(".md") ? name : `${name}.md`;
+	const result = await vaultOpen(run.vault, path);
+	if (isVaultError(result)) return fail(run, result.error);
+	emit(run, { opened: path }, `opened ${path} in Obsidian.`);
+	return 0;
+};
+var refuseReadOnly = (run, verb) => fail(run, `this vault is connected read-only: turn on "Let the agent write notes" in the Obsidian card to ${verb}.`);
+var writeVerb = async (run) => {
+	if (!run.vault.write) return refuseReadOnly(run, "write notes");
+	const name = run.args.positionals.join(" ").trim();
+	if (name === "") return fail(run, `what is it called? obsidian write "Ada Lovelace" --type person --body "…"`);
+	const title = flag(run.args, "title") ?? name.replace(/\.md$/i, "").split("/").pop() ?? name;
+	const path = vaultPath(run, name.includes("/") || name.toLowerCase().endsWith(".md") ? name : slugify(name));
+	const type = flag(run.args, "type");
+	const tags = flagAll(run.args, "tag");
+	const fields = new Map([
+		...type === void 0 ? [] : [["type", [type]]],
+		["title", [title]],
+		...tags.length === 0 ? [] : [["tags", [...tags]]],
+		...linkFields(flagAll(run.args, "link"))
+	]);
+	const body = flag(run.args, "body") ?? "";
+	const result = await vaultWrite(run.vault, path, formatFrontmatter(fields, body === "" ? "" : `${body}\n`));
+	if (isVaultError(result)) return fail(run, result.error);
+	emit(run, {
+		path,
+		title,
+		type
+	}, `wrote ${path}`);
+	return 0;
+};
+var appendVerb = async (run) => {
+	if (!run.vault.write) return refuseReadOnly(run, "add to notes");
+	const name = run.args.positionals.join(" ").trim();
+	const body = flag(run.args, "body");
+	if (name === "" || body === void 0) return fail(run, `obsidian append <file> --body "…"`);
+	const path = name.toLowerCase().endsWith(".md") ? name : `${name}.md`;
+	const result = await vaultAppend(run.vault, path, `\n${body}\n`);
+	if (isVaultError(result)) return fail(run, result.error);
+	emit(run, { path }, `added to ${path}`);
+	return 0;
+};
+var removeVerb = async (run) => {
+	if (!run.vault.write) return refuseReadOnly(run, "delete notes");
+	const name = run.args.positionals.join(" ").trim();
+	if (name === "") return fail(run, "which note? obsidian rm <file>");
+	const path = name.toLowerCase().endsWith(".md") ? name : `${name}.md`;
+	const result = await vaultDelete(run.vault, path);
+	if (isVaultError(result)) return fail(run, result.error, result.status === 404 ? 1 : 2);
+	emit(run, { deleted: path }, `deleted ${path}`);
+	return 0;
+};
+var pullVerb = async (run, root) => {
+	const explicit = run.args.positionals.filter((positional) => positional !== "");
+	if (explicit.length === 0 && !has(run.args, "all")) return fail(run, "which notes? obsidian pull <file…>, or --all for the whole vault.");
+	const wanted = explicit.length > 0 ? explicit.map((name) => name.toLowerCase().endsWith(".md") ? name : `${name}.md`) : await vaultWalk(run.vault);
+	if (isVaultError(wanted)) return fail(run, wanted.error);
+	const into = (flag(run.args, "into") ?? "").replace(/^\/+|\/+$/g, "");
+	const written = [];
+	const failed = [];
+	for (const file of wanted) {
+		const content = await vaultRead(run.vault, file);
+		if (isVaultError(content)) {
+			failed.push({
+				file,
+				error: content.error
+			});
+			continue;
+		}
+		const target = into === "" ? file : `${into}/${file}`;
+		if (await writeNote(root, target, content)) written.push(target);
+		else failed.push({
+			file,
+			error: `"${target}" is not a markdown path inside the knowledge folder`
+		});
+	}
+	emit(run, {
+		pulled: written,
+		failed,
+		folder: root
+	}, [
+		`${written.length} note${written.length === 1 ? "" : "s"} copied into ${root}`,
+		...written.map((path) => `  ${path}`),
+		...failed.length === 0 ? [] : ["could not copy:", ...failed.map((entry) => `  ${entry.file}, ${entry.error}`)]
+	].join("\n"));
+	return written.length === 0 ? 1 : 0;
+};
+var pushVerb = async (run, index) => {
+	if (!run.vault.write) return refuseReadOnly(run, "copy notes into it");
+	const names = run.args.positionals.filter((positional) => positional !== "");
+	if (names.length === 0) return fail(run, "which notes? obsidian push <name…>: a title, an alias, a filename or a path.");
+	const into = flag(run.args, "into") ?? run.vault.folder;
+	const written = [];
+	const failed = [];
+	for (const name of names) {
+		const note = index.resolve(name) ?? index.byPath.get(name);
+		if (note === void 0) {
+			const near = search(index, {
+				query: name,
+				limit: 3
+			}).map((hit) => hit.path);
+			failed.push({
+				name,
+				error: `no note by that name${near.length === 0 ? "" : `, closest: ${near.join(", ")}`}`
+			});
+			continue;
+		}
+		const target = into === "" ? note.path : `${into.replace(/^\/+|\/+$/g, "")}/${note.path}`;
+		const result = await vaultWrite(run.vault, target, note.content);
+		if (isVaultError(result)) {
+			failed.push({
+				name,
+				error: result.error
+			});
+			continue;
+		}
+		written.push(target);
+	}
+	emit(run, {
+		pushed: written,
+		failed
+	}, [
+		`${written.length} note${written.length === 1 ? "" : "s"} copied into the vault`,
+		...written.map((path) => `  ${path}`),
+		...failed.length === 0 ? [] : ["could not copy:", ...failed.map((entry) => `  ${entry.name}, ${entry.error}`)]
+	].join("\n"));
+	return written.length === 0 ? 1 : 0;
+};
+var workspaceRoot = () => process.env["WORKSPACE_ROOT"] ?? "/work";
+var NEEDS_KNOWLEDGE = /* @__PURE__ */ new Set(["push"]);
+var main = async () => {
+	const args = parseArgs(process.argv.slice(2));
+	const json = has(args, "json");
+	if (args.verb === "" || args.verb === "help" || has(args, "help")) {
+		out(USAGE);
+		return args.verb === "" && !has(args, "help") ? 2 : 0;
+	}
+	const connections = vaultConnections(process.env);
+	if (args.verb === "vaults") {
+		if (connections.length === 0) {
+			out(json ? JSON.stringify({ vaults: [] }, void 0, 2) : "no Obsidian vault is connected, add the Obsidian card in Capabilities.");
+			return 1;
+		}
+		out(json ? JSON.stringify({ vaults: connections.map(({ apiKey: _apiKey, ...rest }) => rest) }, void 0, 2) : connections.map((connection) => [`${connection.name}  ${connection.url}`, `  ${connection.write ? "read and write" : "read only"}${connection.problem === void 0 ? "" : `  ·  ${connection.problem}`}`].join("\n")).join("\n"));
+		return 0;
+	}
+	const selected = selectVault(connections, flag(args, "vault"));
+	if ("error" in selected) {
+		out(json ? JSON.stringify(selected, void 0, 2) : `obsidian: ${selected.error}`);
+		return 2;
+	}
+	relaxTlsFor(selected.vault.url, process.env);
+	const run = {
+		args,
+		vault: selected.vault,
+		json
+	};
+	const workspace = workspaceRoot();
+	const root = knowledgeRoot(workspace, process.env["KB_FOLDER"] ?? await configuredFolder(workspace));
+	const files = NEEDS_KNOWLEDGE.has(args.verb) ? await readNotes(root) : [];
+	switch (args.verb) {
+		case "status": return await statusVerb(run);
+		case "ls":
+		case "list": return await lsVerb(run);
+		case "read":
+		case "note": return await readVerb(run);
+		case "find":
+		case "search": return await findVerb(run);
+		case "open": return await openVerb(run);
+		case "write":
+		case "new": return await writeVerb(run);
+		case "append": return await appendVerb(run);
+		case "rm":
+		case "delete": return await removeVerb(run);
+		case "pull": return await pullVerb(run, root);
+		case "push":
+			if (files.length === 0) {
+				emit(run, {
+					folder: root,
+					notes: 0
+				}, `no notes yet in ${root}, nothing to push.`);
+				return 1;
+			}
+			return await pushVerb(run, buildIndex(files));
+		default:
+			out(`obsidian: no verb "${args.verb}".\n\n${USAGE}`);
+			return 2;
+	}
+};
+main().then((code) => {
+	process.exitCode = code;
+}, (error) => {
+	process.stderr.write(`obsidian: ${errorMessage(error)}\n`);
+	process.exitCode = 2;
+});
+//#endregion
+export {};
