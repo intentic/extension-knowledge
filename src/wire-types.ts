@@ -1,9 +1,6 @@
 // The wire shapes as plain types, with no schema library behind them: what a stand-in for the backend (the demo
 // fixture) can import without pulling zod, and what contract.ts binds its schemas to so the two cannot drift.
 
-// Own namespace the daemon proxies; a literal so the permissions scanner can resolve interpolated calls.
-export const KNOWLEDGE_BASE = "/x/intentic.knowledge";
-
 // A note as the list needs it: everything a row draws from, not the whole of a knowledge base's note.
 export interface NoteSummary {
     // Relative to the knowledge folder, forward-slash, with extension; a note's identity.

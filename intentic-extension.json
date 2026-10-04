@@ -6,7 +6,7 @@
     "category": "knowledge",
     "icon": "sitemap",
     "engines": {
-        "intentic": "^2.1.0"
+        "intentic": "^2.20.0"
     },
     "entry": "dist/extension.js",
     "server": "dist/server.js",

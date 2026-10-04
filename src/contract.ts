@@ -2,10 +2,10 @@ import { z } from "zod";
 import type { Graph, Note, NoteLink, NoteSummary, Overview, SearchHit } from "./wire-types.js";
 
 // The knowledge extension's own wire contract, shared only by its two halves, compiled together so their wire can't
-// drift. Paths are relative: the daemon proxies /x/intentic.knowledge/<path> and strips the prefix before both halves
-// see it. Each schema is bound to its plain type in wire-types.ts, the zod-free module a stand-in backend imports.
+// drift. Paths are relative: the UI calls them through `api.backend`, the host adds `/x/<install id>/`, and the daemon
+// strips that prefix before the backend sees it. Each schema is bound to its plain type in wire-types.ts, the zod-free
+// module a stand-in backend imports.
 
-export { KNOWLEDGE_BASE } from "./wire-types.js";
 export type { Graph, Note, NoteLink, NoteSummary, Overview, SearchHit } from "./wire-types.js";
 
 // A note as the list needs it: everything a row draws from, not the whole of a knowledge base's note.

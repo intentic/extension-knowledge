@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@intentic+base@1.281.0/node_modules/@intentic/base/dist/errors.js
+//#region node_modules/.pnpm/@intentic+base@1.323.0/node_modules/@intentic/base/dist/errors.js
 var errorMessage = (error) => error instanceof Error ? error.message : String(error);
 //#endregion
 //#region src/notes/frontmatter.ts
@@ -444,7 +444,7 @@ var writeNote = async (root, name, content) => {
 	return true;
 };
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@intentic+sandbox-contract@1.281.0/node_modules/@intentic/sandbox-contract/dist/policy/capability-env.js
+//#region node_modules/.pnpm/@intentic+sandbox-contract@1.323.0/node_modules/@intentic/sandbox-contract/dist/policy/capability-env.js
 var envSuffix = (id) => id.toUpperCase().replaceAll("-", "_");
 //#endregion
 //#region src/obsidian/connection.ts

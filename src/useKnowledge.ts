@@ -3,7 +3,6 @@ import { computed, type Ref } from "vue";
 import {
     type Graph,
     GraphSchema,
-    KNOWLEDGE_BASE,
     type Note,
     NoteSchema,
     type Overview,
@@ -29,7 +28,7 @@ export function useOverview() {
     const api = host();
     const overview = useQuery({
         queryKey: api.sandbox.key(`knowledge`, `overview`),
-        queryFn: async () => OverviewSchema.parse(await api.sandbox.json(`${KNOWLEDGE_BASE}/overview`)),
+        queryFn: async () => OverviewSchema.parse(await api.backend.json(`overview`)),
         enabled: computed(() => api.sandbox.reachable()),
         refetchInterval: POLL_MS,
     });
@@ -57,8 +56,8 @@ export function useSearch(filters: Ref<Filters>) {
         ),
         queryFn: async () =>
             SearchResultSchema.parse(
-                await api.sandbox.json(
-                    `${KNOWLEDGE_BASE}/search?${query({
+                await api.backend.json(
+                    `search?${query({
                         q: filters.value.q,
                         type: filters.value.type,
                         tag: filters.value.tag,
@@ -84,7 +83,7 @@ export function useNote(path: Ref<string | undefined>) {
     const api = host();
     const note = useQuery({
         queryKey: computed(() => api.sandbox.key(`knowledge`, `note`, path.value ?? ``)),
-        queryFn: async () => NoteSchema.parse(await api.sandbox.json(`${KNOWLEDGE_BASE}/note?${query({ path: path.value })}`)),
+        queryFn: async () => NoteSchema.parse(await api.backend.json(`note?${query({ path: path.value })}`)),
         enabled: computed(() => api.sandbox.reachable() && path.value !== undefined),
     });
     return {
@@ -98,7 +97,7 @@ export function useGraph(path: Ref<string | undefined>, depth: Ref<number>, enab
     const api = host();
     const graph = useQuery({
         queryKey: computed(() => api.sandbox.key(`knowledge`, `graph`, path.value ?? ``, String(depth.value))),
-        queryFn: async () => GraphSchema.parse(await api.sandbox.json(`${KNOWLEDGE_BASE}/graph?${query({ focus: path.value, depth: depth.value })}`)),
+        queryFn: async () => GraphSchema.parse(await api.backend.json(`graph?${query({ focus: path.value, depth: depth.value })}`)),
         // Fetched only once the map is actually viewed; the most expensive query here.
         enabled: computed(() => api.sandbox.reachable() && path.value !== undefined && enabled.value),
     });
@@ -116,7 +115,7 @@ export function useNoteMutations() {
     const invalidate = (): Promise<void> => queryClient.invalidateQueries({ queryKey: api.sandbox.key(`knowledge`) });
     const save = useMutation({
         mutationFn: ({ path, content }: { path: string; content: string }) =>
-            api.sandbox.json(`${KNOWLEDGE_BASE}/note`, {
+            api.backend.json(`note`, {
                 method: `PUT`,
                 headers: { "content-type": `application/json` },
                 body: JSON.stringify({ path, content }),
@@ -125,7 +124,7 @@ export function useNoteMutations() {
     });
     const remove = useMutation({
         mutationFn: ({ path }: { path: string }) =>
-            api.sandbox.json(`${KNOWLEDGE_BASE}/note`, {
+            api.backend.json(`note`, {
                 method: `DELETE`,
                 headers: { "content-type": `application/json` },
                 body: JSON.stringify({ path }),
@@ -134,7 +133,7 @@ export function useNoteMutations() {
     });
     // Owner-pressed from the empty state; answers with what it wrote so the panel can open it.
     const seed = useMutation({
-        mutationFn: async () => SeedResultSchema.parse(await api.sandbox.json(`${KNOWLEDGE_BASE}/seed`, { method: `POST` })),
+        mutationFn: async () => SeedResultSchema.parse(await api.backend.json(`seed`, { method: `POST` })),
         onSuccess: () => void invalidate(),
     });
     return { save, remove, seed };

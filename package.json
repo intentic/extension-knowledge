@@ -13,17 +13,17 @@
         "verify": "pnpm run build && pnpm run typecheck && pnpm run test"
     },
     "dependencies": {
-        "@intentic/base": "^1.281.0",
-        "@intentic/extension-api": "^1.281.0",
-        "@intentic/extension-ui": "^1.281.0",
-        "@intentic/sandbox-contract": "^1.281.0",
+        "@intentic/base": "^1.323.0",
+        "@intentic/extension-api": "^1.323.0",
+        "@intentic/extension-ui": "^1.323.0",
+        "@intentic/sandbox-contract": "^1.323.0",
         "@orpc/contract": "^1.14.13",
         "@orpc/openapi": "^1.14.13",
         "@orpc/server": "^1.14.13",
         "zod": "^4.5.4"
     },
     "devDependencies": {
-        "@intentic/extension-manifest": "^1.281.0",
+        "@intentic/extension-manifest": "^1.323.0",
         "@tanstack/vue-query": "^5.101.4",
         "@types/node": "^24.13.2",
         "@vitejs/plugin-vue": "^6.0.8",

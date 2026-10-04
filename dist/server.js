@@ -1,6 +1,6 @@
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+shared@1.15.1/node_modules/@orpc/shared/dist/index.mjs
+//#region node_modules/.pnpm/@orpc+shared@1.15.1/node_modules/@orpc/shared/dist/index.mjs
 function resolveMaybeOptionalOptions(rest) {
 	return rest[0] ?? {};
 }
@@ -235,7 +235,7 @@ function tryDecodeURIComponent(value) {
 	}
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+client@1.15.1/node_modules/@orpc/client/dist/shared/client.lSRQX-Yb.mjs
+//#region node_modules/.pnpm/@orpc+client@1.15.1/node_modules/@orpc/client/dist/shared/client.lSRQX-Yb.mjs
 var ORPC_CLIENT_PACKAGE_NAME = "@orpc/client";
 var ORPC_CLIENT_PACKAGE_VERSION = "1.15.1";
 var COMMON_ORPC_ERROR_DEFS = {
@@ -401,7 +401,7 @@ function createORPCErrorFromJson(json, options = {}) {
 	});
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+standard-server@1.15.1/node_modules/@orpc/standard-server/dist/index.mjs
+//#region node_modules/.pnpm/@orpc+standard-server@1.15.1/node_modules/@orpc/standard-server/dist/index.mjs
 var EventEncoderError = class extends TypeError {};
 var EventDecoderError = class extends TypeError {};
 var ErrorEvent = class extends Error {
@@ -612,7 +612,7 @@ function flattenHeader(header) {
 	return header.join(", ");
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+client@1.15.1/node_modules/@orpc/client/dist/shared/client.BLtwTQUg.mjs
+//#region node_modules/.pnpm/@orpc+client@1.15.1/node_modules/@orpc/client/dist/shared/client.BLtwTQUg.mjs
 function mapEventIterator(iterator, maps) {
 	const mapError = async (error) => {
 		let mappedError = await maps.error(error);
@@ -648,7 +648,7 @@ function mapEventIterator(iterator, maps) {
 	});
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+standard-server-fetch@1.15.1/node_modules/@orpc/standard-server-fetch/dist/index.mjs
+//#region node_modules/.pnpm/@orpc+standard-server-fetch@1.15.1/node_modules/@orpc/standard-server-fetch/dist/index.mjs
 function toEventIterator(stream, options = {}) {
 	const reader = (stream?.pipeThrough(new TextDecoderStream()).pipeThrough(new EventDecoderStream()))?.getReader();
 	let span;
@@ -875,7 +875,7 @@ function toFetchResponse(response, options = {}) {
 	});
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+server@1.15.1/node_modules/@orpc/server/dist/shared/server.DZ5BIITo.mjs
+//#region node_modules/.pnpm/@orpc+server@1.15.1/node_modules/@orpc/server/dist/shared/server.DZ5BIITo.mjs
 function resolveFriendlyStandardHandleOptions(options) {
 	return {
 		...options,
@@ -883,12 +883,12 @@ function resolveFriendlyStandardHandleOptions(options) {
 	};
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+client@1.15.1/node_modules/@orpc/client/dist/shared/client.B4gi67kE.mjs
+//#region node_modules/.pnpm/@orpc+client@1.15.1/node_modules/@orpc/client/dist/shared/client.B4gi67kE.mjs
 function toHttpPath(path) {
 	return `/${path.map(encodeURIComponent).join("/")}`;
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+contract@1.15.1/node_modules/@orpc/contract/dist/shared/contract.D_dZrO__.mjs
+//#region node_modules/.pnpm/@orpc+contract@1.15.1/node_modules/@orpc/contract/dist/shared/contract.D_dZrO__.mjs
 var ValidationError = class extends Error {
 	issues;
 	data;
@@ -953,7 +953,7 @@ function isContractProcedure(item) {
 	return (typeof item === "object" || typeof item === "function") && item !== null && "~orpc" in item && typeof item["~orpc"] === "object" && item["~orpc"] !== null && "errorMap" in item["~orpc"] && "route" in item["~orpc"] && "meta" in item["~orpc"];
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+contract@1.15.1/node_modules/@orpc/contract/dist/index.mjs
+//#region node_modules/.pnpm/@orpc+contract@1.15.1/node_modules/@orpc/contract/dist/index.mjs
 function mergeMeta(meta1, meta2) {
 	return {
 		...meta1,
@@ -1165,7 +1165,7 @@ function fallbackContractConfig(key, value) {
 	return value;
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+server@1.15.1/node_modules/@orpc/server/dist/shared/server.DEBcqOjg.mjs
+//#region node_modules/.pnpm/@orpc+server@1.15.1/node_modules/@orpc/server/dist/shared/server.DEBcqOjg.mjs
 var LAZY_SYMBOL = Symbol("ORPC_LAZY_SYMBOL");
 function lazy(loader, meta = {}) {
 	return { [LAZY_SYMBOL]: {
@@ -1445,7 +1445,7 @@ function createContractedProcedure(procedure, contract) {
 	});
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+server@1.15.1/node_modules/@orpc/server/dist/shared/server.CMf4nKky.mjs
+//#region node_modules/.pnpm/@orpc+server@1.15.1/node_modules/@orpc/server/dist/shared/server.CMf4nKky.mjs
 var CompositeStandardHandlerPlugin = class {
 	plugins;
 	constructor(plugins = []) {
@@ -1533,7 +1533,7 @@ var StandardHandler = class {
 	}
 };
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+server@1.15.1/node_modules/@orpc/server/dist/adapters/fetch/index.mjs
+//#region node_modules/.pnpm/@orpc+server@1.15.1/node_modules/@orpc/server/dist/adapters/fetch/index.mjs
 var CompositeFetchHandlerPlugin = class extends CompositeStandardHandlerPlugin {
 	initRuntimeAdapter(options) {
 		for (const plugin of this.plugins) plugin.initRuntimeAdapter?.(options);
@@ -1565,7 +1565,7 @@ var FetchHandler = class {
 	}
 };
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+openapi-client@1.15.1/node_modules/@orpc/openapi-client/dist/shared/openapi-client.t9fCAe3x.mjs
+//#region node_modules/.pnpm/@orpc+openapi-client@1.15.1/node_modules/@orpc/openapi-client/dist/shared/openapi-client.t9fCAe3x.mjs
 var StandardBracketNotationSerializer = class {
 	maxArrayIndex;
 	constructor(options = {}) {
@@ -1675,7 +1675,7 @@ function pushStyleArrayToObject(array) {
 	return obj;
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+openapi-client@1.15.1/node_modules/@orpc/openapi-client/dist/shared/openapi-client.B2Q9qU5m.mjs
+//#region node_modules/.pnpm/@orpc+openapi-client@1.15.1/node_modules/@orpc/openapi-client/dist/shared/openapi-client.B2Q9qU5m.mjs
 var StandardOpenAPIJsonSerializer = class {
 	customSerializers;
 	constructor(options = {}) {
@@ -1751,7 +1751,7 @@ var StandardOpenAPISerializer = class {
 	}
 };
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+server@1.15.1/node_modules/@orpc/server/dist/index.mjs
+//#region node_modules/.pnpm/@orpc+server@1.15.1/node_modules/@orpc/server/dist/index.mjs
 var DEFAULT_CONFIG = {
 	initialInputValidationIndex: 0,
 	initialOutputValidationIndex: 0,
@@ -2151,7 +2151,7 @@ function implement(contract, config = {}) {
 	return impl;
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/rou3@0.7.12/node_modules/rou3/dist/index.mjs
+//#region node_modules/.pnpm/rou3@0.7.12/node_modules/rou3/dist/index.mjs
 var NullProtoObj = /* @__PURE__ */ (() => {
 	const e = function() {};
 	return e.prototype = Object.create(null), Object.freeze(e.prototype), e;
@@ -2316,7 +2316,7 @@ function _lookupTree(ctx, node, method, segments, index) {
 	if (node.wildcard && node.wildcard.methods) return node.wildcard.methods[method] || node.wildcard.methods[""];
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+openapi@1.15.1/node_modules/@orpc/openapi/dist/shared/openapi.DPiCV5hl.mjs
+//#region node_modules/.pnpm/@orpc+openapi@1.15.1/node_modules/@orpc/openapi/dist/shared/openapi.DPiCV5hl.mjs
 var StandardOpenAPICodec = class {
 	constructor(serializer, options = {}) {
 		this.serializer = serializer;
@@ -2487,7 +2487,7 @@ var StandardOpenAPIHandler = class extends StandardHandler {
 	}
 };
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/@orpc+openapi@1.15.1/node_modules/@orpc/openapi/dist/adapters/fetch/index.mjs
+//#region node_modules/.pnpm/@orpc+openapi@1.15.1/node_modules/@orpc/openapi/dist/adapters/fetch/index.mjs
 var OpenAPIHandler = class extends FetchHandler {
 	constructor(router, options = {}) {
 		super(new StandardOpenAPIHandler(router, options), options);
@@ -3208,7 +3208,7 @@ var overviewFor = (index, folder) => {
 	};
 };
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/util.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/util.js
 function getEnumValues(entries) {
 	const numericValues = Object.values(entries).filter((v) => typeof v === "number");
 	return Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
@@ -3731,7 +3731,7 @@ function constantCatch(value) {
 	return fn;
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/core.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/core.js
 var _a$1;
 var _zodDesc = {
 	value: void 0,
@@ -3837,7 +3837,7 @@ function config(newConfig) {
 	return globalConfig;
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/errors.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/errors.js
 function _getMessage() {
 	const internals = this._zod;
 	internals.message ?? (internals.message = JSON.stringify(internals.def, jsonStringifyReplacer, 2));
@@ -3953,7 +3953,7 @@ function formatError(error, mapper = (issue) => issue.message) {
 	return fieldErrors;
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/parse.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/parse.js
 function finalizeParams(callee, params) {
 	return {
 		callee: params?.callee ?? callee,
@@ -4156,7 +4156,7 @@ var _safeDecodeAsync = (_Err) => async (schema, value, _ctx) => {
 	return _safeParseAsync(_Err)(schema, value, _ctx);
 };
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/regexes.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/regexes.js
 /**
 * @deprecated CUID v1 is deprecated by its authors due to information leakage
 * (timestamps embedded in the id). Use {@link cuid2} instead.
@@ -4226,7 +4226,7 @@ var number$2 = /^-?\d+(?:\.\d+)?$/;
 var lowercase = /^[^A-Z]*$/;
 var uppercase = /^[^a-z]*$/;
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/checks.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/checks.js
 var $ZodCheck = /*@__PURE__*/ $constructor("$ZodCheck", (inst, def) => {
 	var _a;
 	inst._zod ?? (inst._zod = {});
@@ -4522,7 +4522,7 @@ var $ZodCheckOverwrite = /*@__PURE__*/ $constructor("$ZodCheckOverwrite", (inst,
 	};
 });
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/doc.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/doc.js
 var Doc = class {
 	constructor(args = [], closed = {}) {
 		this.content = [];
@@ -4556,14 +4556,14 @@ var Doc = class {
 	}
 };
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/versions.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/versions.js
 var version = {
 	major: 4,
 	minor: 6,
 	patch: 5
 };
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/schemas.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/schemas.js
 var $ZodType = /*@__PURE__*/ $constructor("$ZodType", (inst, def) => {
 	var _a;
 	inst ?? (inst = {});
@@ -5783,7 +5783,7 @@ function handleRefineResult(result, payload, input, inst) {
 	}
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/memoizer.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/memoizer.js
 var $ZodCyclicError = class extends Error {
 	constructor() {
 		super(`Cannot parse a reference cycle that closes through a transform`);
@@ -6036,7 +6036,7 @@ function isBackEdge(ctx, value) {
 	return backEdges !== void 0 && isRef(value) && backEdges.has(value);
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/locales/en.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/locales/en.js
 var error = () => {
 	const Sizable = {
 		string: {
@@ -6144,7 +6144,7 @@ function en_default() {
 	return { localeError: error() };
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/registries.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/registries.js
 var _a;
 var $ZodRegistry = class {
 	constructor() {
@@ -6191,7 +6191,7 @@ function registry() {
 (_a = globalThis).__zod_globalRegistry ?? (_a.__zod_globalRegistry = registry());
 var globalRegistry = globalThis.__zod_globalRegistry;
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/api.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/api.js
 function snapshotChecks(def) {
 	if (def.checks) def.checks = [...def.checks];
 	return def;
@@ -6702,7 +6702,7 @@ function _check(fn, params) {
 	return ch;
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/to-json-schema.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/to-json-schema.js
 function assignProps(target, ...sources) {
 	for (const source of sources) for (const key of Reflect.ownKeys(source)) if (Object.prototype.propertyIsEnumerable.call(source, key)) assignProp(target, key, source[key]);
 	return target;
@@ -7146,7 +7146,7 @@ var createStandardJSONSchemaMethod = (schema, io, processors = {}) => (params) =
 	return finalize(ctx, schema);
 };
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/json-schema-processors.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/json-schema-processors.js
 var narrowMin = (agg, key, value) => {
 	if (agg[key] === void 0 || value > agg[key]) agg[key] = value;
 };
@@ -7490,7 +7490,7 @@ var optionalProcessor = (schema, ctx, _json, params) => {
 	seen.ref = def.innerType;
 };
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/classic/errors.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/classic/errors.js
 var _installedErrorProtos = /* @__PURE__ */ new WeakSet([Object.prototype, Error.prototype]);
 function _lazyMethod(proto, key, make) {
 	Object.defineProperty(proto, key, {
@@ -7540,7 +7540,7 @@ var initializer = (inst, issues) => {
 };
 var ZodRealError = /*@__PURE__*/ $constructor("ZodError", initializer, void 0, { Parent: Error });
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/classic/parse.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/classic/parse.js
 var parse = /* @__PURE__ */ _parse(ZodRealError);
 var parseAsync = /* @__PURE__ */ _parseAsync(ZodRealError);
 var safeParse = /* @__PURE__ */ _safeParse(ZodRealError);
@@ -7554,7 +7554,7 @@ var safeDecode = /* @__PURE__ */ _safeDecode(ZodRealError);
 var safeEncodeAsync = /* @__PURE__ */ _safeEncodeAsync(ZodRealError);
 var safeDecodeAsync = /* @__PURE__ */ _safeDecodeAsync(ZodRealError);
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/classic/schemas.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/classic/schemas.js
 function _ensureDefaultLocale() {
 	if (!globalConfig.localeError) config(en_default());
 }
@@ -8392,7 +8392,7 @@ function superRefine(fn, params) {
 	return /* @__PURE__ */ _superRefine(fn, params);
 }
 //#endregion
-//#region ../../../tmp/extbuild/knowledge/node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/classic/coerce.js
+//#region node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/classic/coerce.js
 function number(params) {
 	return /* @__PURE__ */ _coercedNumber(ZodNumber, params);
 }

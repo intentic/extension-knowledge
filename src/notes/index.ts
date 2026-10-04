@@ -7,4 +7,4 @@ export { parseNote, type NoteFile, type ParsedNote, factsOf } from "./note.js";
 export { neighbourhood, search, type GraphView, type SearchFilters } from "./query.js";
 export { starterNotes } from "./starter.js";
 export { graphOf, hitsOf, noteOf, overviewFor, summaryOf } from "./wire.js";
-export { KNOWLEDGE_BASE, type Graph, type Note, type NoteLink, type NoteSummary, type Overview, type SearchHit } from "../wire-types.js";
+export { type Graph, type Note, type NoteLink, type NoteSummary, type Overview, type SearchHit } from "../wire-types.js";
