@@ -15,7 +15,7 @@
     "dependencies": {
         "@intentic/base": "^1.323.0",
         "@intentic/extension-api": "^1.323.0",
-        "@intentic/extension-ui": "^1.323.0",
+        "@intentic/extension-ui": "^1.333.1",
         "@intentic/sandbox-contract": "^1.323.0",
         "@orpc/contract": "^1.14.13",
         "@orpc/openapi": "^1.14.13",

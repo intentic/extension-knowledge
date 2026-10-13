@@ -10,14 +10,18 @@ import {
     Picker,
     type NoticeModel,
     type PickerOptions,
+    SkeletonSnapshot,
     useKeyedDraft,
+    useLoadingReveal,
     useNarrow,
     useScrollReset,
     useStickyTop,
+    vSkeletonSource,
 } from "@intentic/extension-ui";
 import { computed, ref, watch } from "vue";
 import { filterOptions, type Filters, useNoteMutations, useOverview, useSearch } from "./useKnowledge";
 import NoteIndex from "./NoteIndex.vue";
+import NoteSkeleton from "./NoteSkeleton.vue";
 import KnowledgePane from "./KnowledgePane.vue";
 
 // The owner's knowledge base: notes and the graph they form. Search is the only navigation, since every other way in
@@ -32,7 +36,7 @@ const stacked = useNarrow(body, 36);
 const chrome = ref<HTMLElement | undefined>(undefined);
 const pinned = useStickyTop(chrome);
 
-const { overview, error: overviewError } = useOverview();
+const { overview, error: overviewError, isLoading: overviewLoading } = useOverview();
 
 const q = ref(``);
 const type = ref<string>();
@@ -42,6 +46,11 @@ const filters = computed<Filters>(() => ({ q: q.value, type: type.value, tag: ta
 const filtered = computed(() => q.value !== `` || type.value !== undefined || tag.value !== undefined || linkedTo.value !== undefined);
 
 const { hits, error: searchError, isLoading, isFetching } = useSearch(filters);
+// The same gate, on the same wait, as the index's own outline, so the list and the pane beside it appear together.
+const outline = useLoadingReveal(
+    isLoading,
+    computed(() => `note-search`),
+);
 
 const options = computed(() => filterOptions(overview.value));
 const pickerOptions = (values: readonly string[], all: string): PickerOptions => [
@@ -178,7 +187,9 @@ const startKnowledge = async (): Promise<void> => {
                     />
                 </template>
                 <template #actions>
-                    <span v-if="overview" class="text-2xs text-subtle">
+                    <!-- Not guessed at while the first read is in flight: its last shape stands in once seen, nothing before. -->
+                    <SkeletonSnapshot v-if="overviewLoading" of="knowledge.tally" />
+                    <span v-else-if="overview" v-skeleton-source="`knowledge.tally`" class="text-2xs text-subtle">
                         {{ overview.noteCount }} {{ overview.noteCount === 1 ? `note` : `notes` }} · {{ overview.linkCount }}
                         {{ overview.linkCount === 1 ? `link` : `links` }} · {{ overview.types.length }}
                         {{ overview.types.length === 1 ? `kind` : `kinds` }}
@@ -230,19 +241,26 @@ const startKnowledge = async (): Promise<void> => {
                 <NoteIndex :hits="hits" :selected="selected" :filtered="filtered" :is-loading="isLoading" @pick="open" />
             </div>
 
-            <!-- No `:key`: the page's scroll resets instead (useScrollReset), without discarding the pane or an open draft. -->
-            <KnowledgePane
-                v-if="selected"
-                v-model:draft="draft"
-                :path="selected"
-                class="min-w-0 flex-1"
-                @open="open"
-                @filter="showLinked"
-                @forgotten="selected = undefined"
-            />
+            <!-- No `:key`: the page's scroll resets instead (useScrollReset), without discarding the pane or an open draft.
+                 The box is the pane's imprint root, an element where the pane's own root is a component's. -->
+            <div v-if="selected" v-skeleton-source="`knowledge.pane`" class="min-w-0 flex-1">
+                <KnowledgePane v-model:draft="draft" :path="selected" @open="open" @filter="showLinked" @forgotten="selected = undefined" />
+            </div>
+
+            <!-- The first search is still out, so the first hit is about to open: the pane as it last looked, not "Pick a
+                 note", which would be a choice the list is about to make. -->
+            <template v-else-if="isLoading">
+                <SkeletonSnapshot v-if="outline" of="knowledge.pane" label="Reading your notes…">
+                    <NoteSkeleton framed class="min-w-0 flex-1" />
+                </SkeletonSnapshot>
+            </template>
 
             <!-- No `min-h-0`: nothing clamps this row, so there's no height for it to shrink below; its own padding sizes it. -->
-            <section v-else :class="ui.emptyState(`flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10`)">
+            <section
+                v-else
+                v-skeleton-source="`knowledge.pane`"
+                :class="ui.emptyState(`flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10`)"
+            >
                 <Icon name="sitemap" class="text-base text-subtle" />
                 <p class="text-sm text-muted">Pick a note to read it.</p>
                 <p class="max-w-xs text-xs text-subtle">Follow its links to move through your knowledge the way the agent does.</p>

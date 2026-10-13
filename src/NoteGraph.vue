@@ -1,5 +1,15 @@
 <script setup lang="ts">
-import { Button, DagGraph, type DagEdge, type DagNode, Icon, StatusBadge, type StatusVariant } from "@intentic/extension-ui";
+import {
+    Button,
+    DagGraph,
+    type DagEdge,
+    type DagNode,
+    Icon,
+    SkeletonSnapshot,
+    StatusBadge,
+    type StatusVariant,
+    vSkeletonSource,
+} from "@intentic/extension-ui";
 import { computed, ref, toRef } from "vue";
 import { toneOfType } from "./knowledgeNote";
 import { useGraph } from "./useKnowledge";
@@ -48,6 +58,16 @@ const edges = computed<DagEdge[]>(
         })) ?? [],
 );
 
+// Remembered per note: each neighbourhood is laid out differently, and the map of the last note says nothing about this one.
+const imprint = computed(() => `knowledge.map:${path ?? ``}`);
+
+// The hand-drawn map's tiers, top to bottom like the graph: the note, its neighbours, theirs faded as the real ones are.
+const TIERS = [
+    { cards: 1, faded: false },
+    { cards: 2, faded: false },
+    { cards: 2, faded: true },
+] as const;
+
 const selected = ref<string>();
 const openSelected = (): void => {
     if (selected.value !== undefined && selected.value !== graph.value?.focus) {
@@ -60,8 +80,27 @@ const openSelected = (): void => {
     <!-- A definite height, not a grown one: the canvas measures its parent, and content-sized zero renders nothing. -->
     <div class="relative flex h-figure w-full flex-col">
         <p v-if="error" class="px-4 py-3 text-xs text-danger">{{ error }}</p>
-        <p v-else-if="isLoading" class="px-4 py-6 text-xs text-subtle">Drawing the map…</p>
-        <div v-else-if="nodes.length <= 1" class="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center">
+        <!-- Cards where the map will be, not a "Drawing the map…" line; once this note's map has been drawn, it stands in as
+             it last looked, its edges' layer kept as empty space. -->
+        <SkeletonSnapshot v-else-if="isLoading" :of="imprint" label="Drawing the map…">
+            <div class="flex flex-1 flex-col items-center justify-center gap-8 overflow-hidden" role="status" aria-busy="true">
+                <span class="sr-only">Drawing the map…</span>
+                <div
+                    v-for="(tier, row) in TIERS"
+                    :key="row"
+                    class="flex items-center gap-6"
+                    :class="tier.faded ? `opacity-50` : undefined"
+                    aria-hidden="true"
+                >
+                    <span v-for="card in tier.cards" :key="card" class="skeleton block h-12 w-40 shrink-0 rounded-lg" />
+                </div>
+            </div>
+        </SkeletonSnapshot>
+        <div
+            v-else-if="nodes.length <= 1"
+            v-skeleton-source="imprint"
+            class="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-10 text-center"
+        >
             <Icon name="sitemap" class="text-base text-subtle" />
             <p class="text-sm text-muted">Nothing links to this note yet.</p>
             <p class="max-w-sm text-xs text-subtle">
@@ -74,6 +113,7 @@ const openSelected = (): void => {
         <DagGraph
             v-else
             v-model="selected"
+            v-skeleton-source="imprint"
             class="h-full w-full"
             :nodes="nodes"
             :edges="edges"

@@ -7,14 +7,18 @@ import {
     InfoTable,
     Markdown,
     NoteEditor,
+    SkeletonSnapshot,
     StatusBadge,
     type StatusVariant,
+    useLoadingReveal,
     useNoteDraft,
     ui,
+    vSkeletonSource,
 } from "@intentic/extension-ui";
 import { computed, ref, toRef } from "vue";
 import { linkifyNoteRefs, toneOfType } from "./knowledgeNote";
 import NoteGraph from "./NoteGraph.vue";
+import NoteSkeleton from "./NoteSkeleton.vue";
 import { useNote, useNoteMutations } from "./useKnowledge";
 
 // One knowledge note: what it is, what it says, what it connects to. NoteEditor supplies the frame (actions, delete,
@@ -28,6 +32,12 @@ const emit = defineEmits<{ open: [path: string]; filter: [path: string]; forgott
 const draft = defineModel<string | undefined>(`draft`);
 
 const { note, error: noteError, isLoading } = useNote(toRef(() => path));
+// Gated, since stepping through the list with the arrow keys opens a note per keystroke; keyed on the note, so the next
+// one starts a fresh wait instead of inheriting the last one's outline.
+const outline = useLoadingReveal(
+    isLoading,
+    computed(() => path),
+);
 const { save, remove } = useNoteMutations();
 
 const raw = computed(() => note.value?.content ?? ``);
@@ -78,7 +88,8 @@ const onProseClick = (event: MouseEvent): void => {
 </script>
 
 <template>
-    <!-- One element: the note is the pane, so the frame's length is the note's, not clamped for another section. -->
+    <!-- One element: the note is the pane, so the frame's length is the note's, not clamped for another section. No
+         `loading`: the frame's own is a "Loading…" line, and the wait is drawn below in the note's shape instead. -->
     <NoteEditor
         v-model:source="source"
         v-model:confirming="confirming"
@@ -86,7 +97,6 @@ const onProseClick = (event: MouseEvent): void => {
         :title="note?.summary.title ?? `…`"
         :raw="raw"
         :editing="editing"
-        :loading="isLoading"
         :saving="saving"
         :removing="removing"
         :error="noteError ?? writeError"
@@ -137,7 +147,16 @@ const onProseClick = (event: MouseEvent): void => {
 
         <NoteGraph v-if="view === `map`" :path="path" @open="emit(`open`, $event)" />
 
-        <template v-else>
+        <!-- This note as it last read, per note since one note's length says nothing about the next; hand-drawn prose
+             before it has been seen. Nothing before the reveal: a quick read paints no outline. -->
+        <template v-else-if="isLoading">
+            <SkeletonSnapshot v-if="outline" :of="`knowledge.note:${path}`" label="Reading the note…">
+                <NoteSkeleton />
+            </SkeletonSnapshot>
+        </template>
+
+        <!-- One box for the note's body, so its imprint has a root; a flex column, as the frame laid these out itself. -->
+        <div v-else v-skeleton-source="`knowledge.note:${path}`" class="flex flex-col">
             <!-- Facts and outbound links together, since a `<table>`'s own padding won't indent its cells (the wrapper does). -->
             <div v-if="facts.length > 0 || (note?.linksTo.length ?? 0) > 0" class="flex flex-col gap-2.5 px-5 pt-4">
                 <InfoTable v-if="facts.length > 0" :rows="facts" />
@@ -185,6 +204,6 @@ const onProseClick = (event: MouseEvent): void => {
                     Show these in the list
                 </button>
             </div>
-        </template>
+        </div>
     </NoteEditor>
 </template>
