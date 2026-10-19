@@ -161,7 +161,6 @@ const startKnowledge = async (): Promise<void> => {
                 placeholder="Search the knowledge base…"
                 aria-label="Search the knowledge base"
                 clearable
-                :count="hits.length"
                 :busy="isFetching && !isLoading"
                 @keydown.down.prevent="step(1)"
                 @keydown.up.prevent="step(-1)"
