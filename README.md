@@ -56,9 +56,12 @@ express a typed graph, so this reads the one it was already expressing.
 - [src/contract.ts](src/contract.ts): the extension's OWN wire contract, imported by both halves so their wire
   cannot drift.
 - [src/KnowledgeView.vue](src/KnowledgeView.vue), the section: search, the list, the note, the health strip.
-- [src/KnowledgePane.vue](src/KnowledgePane.vue), one note: read, map, source, and what it is connected to. The
-  frame around it (the action cluster, the delete confirmation, the read-and-write surface) is the kit's
-  `<NoteEditor>`.
+- [src/KnowledgePane.vue](src/KnowledgePane.vue), one note, and what it is connected to. Everything on it is changed
+  where it is read: the title in place, the kind by pressing its badge, each header property as its own field
+  ([NoteProperties.vue](src/NoteProperties.vue)), and the prose as a document that takes the caret and saves itself
+  ([NoteBody.vue](src/NoteBody.vue)). Each change rewrites only its own lines of the file (`setField` and `setBody` in
+  [src/notes/frontmatter.ts](src/notes/frontmatter.ts)), one after another ([src/useNoteWriter.ts](src/useNoteWriter.ts)).
+  The frame (actions, delete confirmation, errors) is the kit's `<NoteEditor>`.
 - [plugin/skills/knowledge/SKILL.md](plugin/skills/knowledge/SKILL.md): when the agent reads the knowledge base and
   when it writes to it.
 

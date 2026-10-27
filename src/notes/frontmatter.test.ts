@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatFrontmatter, parseFrontmatter } from "./frontmatter.js";
+import { formatFrontmatter, parseFrontmatter, setBody, setField } from "./frontmatter.js";
 
 const fields = (content: string): Record<string, readonly string[]> => Object.fromEntries(parseFrontmatter(content).fields);
 
@@ -115,5 +115,61 @@ describe(`formatFrontmatter`, () => {
 
     it(`drops a key with no values rather than writing an empty one`, () => {
         expect(formatFrontmatter(new Map([[`tags`, []]]), `body`)).toBe(`---\n\n---\nbody`);
+    });
+});
+
+describe(`setField`, () => {
+    const note = `---
+type: person
+# who she works for
+employer: Acme
+aliases: [Ada]
+tags:
+  - colleague
+  - reviewer
+works_on: ["[[Storefront]]"]
+---
+Reviews every schema change.
+`;
+
+    it(`rewrites that one key's line and leaves every other byte of the file alone`, () => {
+        expect(setField(note, `employer`, [`Initech`])).toBe(note.replace(`employer: Acme`, `employer: Initech`));
+    });
+
+    it(`keeps a list in the shape it was written: flow stays flow, a block list stays a block list`, () => {
+        expect(setField(note, `aliases`, [`Ada`, `Countess Lovelace`])).toContain(`aliases: [Ada, Countess Lovelace]\n`);
+        expect(setField(note, `tags`, [`colleague`, `math`])).toContain(`tags:\n  - colleague\n  - math\nworks_on:`);
+    });
+
+    it(`quotes a link, so the parser reads back exactly what was written`, () => {
+        const written = setField(note, `works_on`, [`[[Storefront]]`, `[[Checkout API]]`]);
+        expect(parseFrontmatter(written).fields.get(`works_on`)).toEqual([`[[Storefront]]`, `[[Checkout API]]`]);
+    });
+
+    it(`adds a new key last and takes a key out, block list and all, when it has no values`, () => {
+        expect(setField(note, `timezone`, [`Europe/Lisbon`])).toContain(`works_on: ["[[Storefront]]"]\ntimezone: Europe/Lisbon\n---\n`);
+        const without = setField(note, `tags`, []);
+        expect(without).not.toContain(`colleague`);
+        expect(parseFrontmatter(without).fields.get(`works_on`)).toEqual([`[[Storefront]]`]);
+        expect(parseFrontmatter(without).body).toBe(`Reviews every schema change.\n`);
+    });
+
+    it(`gives a file with no header one, and drops a header left with nothing in it`, () => {
+        expect(setField(`Just a thought.`, `type`, [`term`])).toBe(`---\ntype: term\n---\nJust a thought.`);
+        expect(setField(`---\ntype: term\n---\nJust a thought.`, `type`, [])).toBe(`Just a thought.`);
+        expect(setField(`Just a thought.`, `type`, [])).toBe(`Just a thought.`);
+    });
+
+    it(`keeps a file's CRLF line endings`, () => {
+        expect(setField(`---\r\ntype: person\r\nemployer: Acme\r\n---\r\nbody`, `employer`, [`Initech`])).toBe(
+            `---\r\ntype: person\r\nemployer: Initech\r\n---\r\nbody`,
+        );
+    });
+});
+
+describe(`setBody`, () => {
+    it(`replaces the prose and keeps the header exactly as written`, () => {
+        expect(setBody(`---\ntype: person # kept\n---\nold`, `new\n`)).toBe(`---\ntype: person # kept\n---\nnew\n`);
+        expect(setBody(`old`, `new`)).toBe(`new`);
     });
 });

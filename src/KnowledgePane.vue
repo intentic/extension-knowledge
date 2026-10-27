@@ -4,32 +4,33 @@ import {
     formatBytes,
     formatTimestamp,
     Icon,
-    InfoTable,
-    Markdown,
+    messageOr,
     NoteEditor,
     SkeletonSnapshot,
-    StatusBadge,
-    type StatusVariant,
     useLoadingReveal,
-    useNoteDraft,
     ui,
     vSkeletonSource,
 } from "@intentic/extension-ui";
-import { computed, ref, toRef } from "vue";
-import { linkifyNoteRefs, toneOfType } from "./knowledgeNote";
+import { computed, ref, toRef, watch } from "vue";
+import InPlaceText from "./InPlaceText.vue";
+import { linkifyNoteRefs } from "./knowledgeNote";
+import NoteBody from "./NoteBody.vue";
 import NoteGraph from "./NoteGraph.vue";
+import NoteProperties from "./NoteProperties.vue";
 import NoteSkeleton from "./NoteSkeleton.vue";
-import { useNote, useNoteMutations } from "./useKnowledge";
+import NoteType from "./NoteType.vue";
+import { parseFrontmatter, setBody, setField } from "./notes/frontmatter";
+import { useNote, useNoteMutations, useOverview } from "./useKnowledge";
+import { useNoteWriter } from "./useNoteWriter";
 
-// One knowledge note: what it is, what it says, what it connects to. NoteEditor supplies the frame (actions, delete,
-// errors, the read/write surface); this adds the map toggle, the header's facts, and the links. Links-to sits in the
-// head beside the facts (the same kind of claim); linked-from is a see-also at the tail.
+// One knowledge note: what it is, what it says, what it connects to, each changed where it is read. Its name is renamed in
+// place, its kind is its badge, every header property is a row whose value is its own field, and the prose is a document
+// that takes the caret and writes itself. Each change rewrites only its own lines of the file (notes/frontmatter.ts), so
+// the header the panel does not show, comments and order included, comes back as it was. NoteEditor is the frame (copy,
+// delete, the map toggle's place, errors); nothing in it turns into anything else to be written in.
 
 const { path } = defineProps<{ path: string }>();
 const emit = defineEmits<{ open: [path: string]; filter: [path: string]; forgotten: [] }>();
-
-// Owned by the view, not this pane, so a draft survives leaving and returning; undefined means not editing.
-const draft = defineModel<string | undefined>(`draft`);
 
 const { note, error: noteError, isLoading } = useNote(toRef(() => path));
 // Gated, since stepping through the list with the arrow keys opens a note per keystroke; keyed on the note, so the next
@@ -39,81 +40,108 @@ const outline = useLoadingReveal(
     computed(() => path),
 );
 const { save, remove } = useNoteMutations();
-
-const raw = computed(() => note.value?.content ?? ``);
+const { overview } = useOverview();
 const view = ref<`read` | `map`>(`read`);
 
-// Leaving resets the view but never the draft; the confirmation and last error live inside this composable.
-const {
-    source,
-    editing,
-    confirming,
-    error: writeError,
-    saving,
-    removing,
-    startEdit,
-    cancelEdit,
-    saveDraft,
-    forget,
-} = useNoteDraft({
-    draft,
-    raw: () => raw.value,
-    save: (content) => save.mutateAsync({ path, content }),
-    remove: () => remove.mutateAsync({ path }),
-    note: () => path,
-    onLeave: () => (view.value = `read`),
-    onRemoved: () => emit(`forgotten`),
-});
+// THE FILE AS IT STANDS. The writer's copy runs ahead of the server's while a change is on its way back.
+const writer = useNoteWriter((at, content) => save.mutateAsync({ path: at, content }));
+watch(
+    note,
+    (current) => {
+        if (current !== undefined) {
+            writer.seen(current.summary.path, current.content);
+        }
+    },
+    { immediate: true },
+);
+const content = computed(() => writer.known.get(path) ?? note.value?.content ?? ``);
+const header = computed(() => parseFrontmatter(content.value));
+const title = computed(() => header.value.fields.get(`title`)?.[0] ?? note.value?.summary.title ?? `…`);
+const type = computed(() => header.value.fields.get(`type`)?.[0]);
+// The vocabulary's kinds first, as the ones agreed on, then any other the knowledge base already uses.
+const kinds = computed(() => [...new Set([...(overview.value?.vocabulary.types ?? []), ...(overview.value?.types ?? []).map((kind) => kind.name)])]);
+const taken = computed(() => [...header.value.fields.keys(), ...header.value.unreadable]);
 
-// Edits happen on the note itself, in place, not a separate view; steps out of the map, since a draft you can't see is
-// one you'll lose.
-const edit = (): void => {
-    startEdit();
-    view.value = `read`;
+const change = (key: string, values: readonly string[]): void => void writer.change(path, (file) => setField(file, key, values));
+// A note is linked to by its name, so a rename keeps the old one as an alias: every `[[old name]]` written elsewhere still
+// arrives here, and the alias row says why. One write, so the two never land apart.
+const rename = (name: string): void => {
+    const before = title.value;
+    const aliases = header.value.fields.get(`aliases`) ?? [];
+    const keep = name !== `` && before.toLowerCase() !== name.toLowerCase() && !aliases.some((alias) => alias.toLowerCase() === before.toLowerCase());
+    void writer.change(path, (file) => {
+        const named = setField(file, `title`, name === `` ? [] : [name]);
+        return keep ? setField(named, `aliases`, [...aliases, before]) : named;
+    });
 };
-
-// The header's facts as label→value rows; `InfoTable` keeps the value column aligned across them.
-const facts = computed<string[][]>(() => (note.value?.facts ?? []).map((fact) => [fact.key, fact.values.join(`, `)]));
+const retype = (kind: string | undefined): void => change(`type`, kind === undefined ? [] : [kind]);
+// Prose that did not reach the file is kept until it does, so leaving the note and coming back finds it where it was left.
+const writeBody = (at: string, text: string): void => {
+    writer.unsaved.set(at, text);
+    void writer
+        .change(at, (file) => setBody(file, text))
+        .then((written) => {
+            if (written && writer.unsaved.get(at) === text) {
+                writer.unsaved.delete(at);
+            }
+        });
+};
 
 // Resolution is the backend's answer already; an unresolved target is unwritten, drawn unfinished, not broken.
 const resolved = computed(() => new Map((note.value?.linksTo ?? []).map((link) => [link.title, link.path])));
-const decorate = (fragment: DocumentFragment): void => linkifyNoteRefs(fragment, (target) => resolved.value.get(target));
-const onProseClick = (event: MouseEvent): void => {
-    const target = (event.target as HTMLElement | null)?.closest<HTMLElement>(`[data-kb]`)?.dataset[`kb`];
-    if (target !== undefined) {
-        event.preventDefault();
-        emit(`open`, target);
+const resolve = (target: string): string | undefined => resolved.value.get(target);
+const decorate = (fragment: DocumentFragment): void => linkifyNoteRefs(fragment, resolve);
+
+// Deleting: the frame's own confirmation, then the file.
+const confirming = ref(false);
+const removeError = ref<string | undefined>(undefined);
+const forget = async (): Promise<void> => {
+    removeError.value = undefined;
+    try {
+        await remove.mutateAsync({ path });
+        confirming.value = false;
+        emit(`forgotten`);
+    } catch (failure) {
+        removeError.value = messageOr(failure, `Could not delete the note.`);
     }
 };
+// Another note: back to its words, no confirmation or refusal carried over from the last one.
+watch(
+    () => path,
+    () => {
+        view.value = `read`;
+        confirming.value = false;
+        removeError.value = undefined;
+        writer.error.value = undefined;
+    },
+);
 </script>
 
 <template>
     <!-- One element: the note is the pane, so the frame's length is the note's, not clamped for another section. No
-         `loading`: the frame's own is a "Loading…" line, and the wait is drawn below in the note's shape instead. -->
+         `loading`: the frame's own is a "Loading…" line, and the wait is drawn below in the note's shape instead. The frame
+         never edits on its own (`editing` and `writable` off): everything below is written where it stands. -->
     <NoteEditor
-        v-model:source="source"
         v-model:confirming="confirming"
+        :source="content"
+        :raw="content"
+        :editing="false"
+        :writable="false"
         paged
-        :title="note?.summary.title ?? `…`"
-        :raw="raw"
-        :editing="editing"
-        :saving="saving"
-        :removing="removing"
-        :error="noteError ?? writeError"
-        @edit="edit"
-        @cancel="cancelEdit"
-        @save="saveDraft"
+        :title="title"
+        :saving="writer.writing.value"
+        :removing="remove.isPending.value"
+        :error="noteError ?? writer.error.value ?? removeError"
         @remove="forget"
     >
         <template #lead>
             <Icon name="file" class="shrink-0 text-base text-muted" />
         </template>
-        <!-- The type badge only: it costs width off the note's name on this row, and tags already live on the meta line. -->
-        <template #badges>
-            <StatusBadge v-if="note?.summary.type" :variant="toneOfType(note.summary.type) as StatusVariant" size="xs" :label="note.summary.type" />
+        <template v-if="note" #title>
+            <InPlaceText :key="path" :value="title" label="Title" fit @commit="rename" />
         </template>
-        <template #description>
-            <span v-if="note?.summary.aliases.length">Also called {{ note.summary.aliases.join(`, `) }}.</span>
+        <template #badges>
+            <NoteType v-if="note" :type="type" :kinds="kinds" @pick="retype" />
         </template>
         <template #meta>
             <span class="truncate font-mono">{{ path }}</span>
@@ -122,14 +150,10 @@ const onProseClick = (event: MouseEvent): void => {
                 <span>{{ formatBytes(note.summary.sizeBytes) }}</span>
                 <span aria-hidden="true">·</span>
                 <span :title="formatTimestamp(note.summary.modifiedAt)">edited {{ freshness(note.summary.modifiedAt) }}</span>
-                <template v-if="note.summary.tags.length > 0">
-                    <span aria-hidden="true">·</span>
-                    <span v-for="tag in note.summary.tags" :key="tag">#{{ tag }}</span>
-                </template>
             </template>
         </template>
 
-        <!-- Left of Copy/Edit/Delete since it's about the note, not the file; hidden while a draft is open. -->
+        <!-- Left of Copy/Delete since it's about the note, not the file. -->
         <template #actions>
             <button
                 type="button"
@@ -143,7 +167,7 @@ const onProseClick = (event: MouseEvent): void => {
             </button>
         </template>
 
-        <template #confirm> Delete "{{ note?.summary.title }}"? Anything that links to it becomes a link to a note nobody has written. </template>
+        <template #confirm> Delete "{{ title }}"? Anything that links to it becomes a link to a note nobody has written. </template>
 
         <NoteGraph v-if="view === `map`" :path="path" @open="emit(`open`, $event)" />
 
@@ -156,42 +180,30 @@ const onProseClick = (event: MouseEvent): void => {
         </template>
 
         <!-- One box for the note's body, so its imprint has a root; a flex column, as the frame laid these out itself. -->
-        <div v-else v-skeleton-source="`knowledge.note:${path}`" class="flex flex-col">
-            <!-- Facts and outbound links together, since a `<table>`'s own padding won't indent its cells (the wrapper does). -->
-            <div v-if="facts.length > 0 || (note?.linksTo.length ?? 0) > 0" class="flex flex-col gap-2.5 px-5 pt-4">
-                <InfoTable v-if="facts.length > 0" :rows="facts" />
-                <div v-if="note && note.linksTo.length > 0" class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
-                    <span class="text-2xs uppercase tracking-wide text-subtle">Links to</span>
-                    <span v-for="(link, i) in note.linksTo" :key="`out-${link.relation ?? ``}-${link.title}-${i}`" class="flex items-baseline gap-1">
-                        <span v-if="link.relation" class="text-2xs text-subtle">{{ link.relation }}</span>
-                        <button v-if="link.path" type="button" class="text-link hover:underline" @click="emit(`open`, link.path)">
-                            {{ link.title }}
-                        </button>
-                        <span
-                            v-else
-                            class="text-subtle underline decoration-dotted underline-offset-2"
-                            :title="`No note for &quot;${link.title}&quot; yet`"
-                        >
-                            {{ link.title }}
-                        </span>
-                    </span>
-                </div>
-            </div>
-            <Markdown
-                v-if="(note?.body ?? ``).trim() !== ``"
-                :source="note?.body ?? ``"
-                :decorate="decorate"
-                class="px-5 py-4"
-                style="--prose-measure: 74ch"
-                @click="onProseClick"
+        <div v-else-if="note" v-skeleton-source="`knowledge.note:${path}`" class="flex flex-col">
+            <NoteProperties
+                :key="path"
+                class="px-5 pt-4"
+                :fields="header.fields"
+                :taken="taken"
+                :resolve="resolve"
+                @change="change"
+                @open="emit(`open`, $event)"
             />
-            <p v-else class="px-5 py-4 text-xs text-subtle">No text yet: this note is its header.</p>
+            <NoteBody
+                :key="path"
+                :path="path"
+                :body="header.body"
+                :unsaved="writer.unsaved.get(path)"
+                :saving="writer.writing.value"
+                :decorate="decorate"
+                :resolve="resolve"
+                @write="writeBody"
+                @open="emit(`open`, $event)"
+            />
 
             <!-- A see-also, ruled off rather than boxed: a bordered card at a document's end reads as a different document. -->
-            <div
-                v-if="note && note.linkedFrom.length > 0"
-                class="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-line-subtle px-5 py-3 text-xs"
-            >
+            <div v-if="note.linkedFrom.length > 0" class="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-line-subtle px-5 py-3 text-xs">
                 <span class="text-2xs uppercase tracking-wide text-subtle">Linked from</span>
                 <span v-for="(link, i) in note.linkedFrom" :key="`in-${link.relation ?? ``}-${link.title}-${i}`" class="flex items-baseline gap-1">
                     <span v-if="link.relation" class="text-2xs text-subtle">{{ link.relation }}</span>

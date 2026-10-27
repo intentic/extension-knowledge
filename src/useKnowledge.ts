@@ -111,8 +111,13 @@ export function useGraph(path: Ref<string | undefined>, depth: Ref<number>, enab
 export function useNoteMutations() {
     const api = host();
     const queryClient = useQueryClient();
-    // Invalidates everything under `knowledge`: a write can change backlinks, counts and the map too.
-    const invalidate = (): Promise<void> => queryClient.invalidateQueries({ queryKey: api.sandbox.key(`knowledge`) });
+    // Invalidates everything under `knowledge`: a write can change backlinks, counts and the map too. Matched on the first
+    // part and the sandbox, not as a key prefix: `sandbox.key` puts the sandbox LAST (`[knowledge, note, path, sandbox]`),
+    // so `key("knowledge")` (`[knowledge, sandbox]`) prefixes none of them, and the open note never read its own write.
+    const invalidate = (): Promise<void> => {
+        const scope = api.sandbox.key().at(-1);
+        return queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === `knowledge` && query.queryKey.at(-1) === scope });
+    };
     const save = useMutation({
         mutationFn: ({ path, content }: { path: string; content: string }) =>
             api.backend.json(`note`, {

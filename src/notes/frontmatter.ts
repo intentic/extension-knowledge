@@ -151,3 +151,69 @@ export const formatFrontmatter = (fields: ReadonlyMap<string, readonly string[]>
     // No blank line after the fence: `parseFrontmatter` stops there, so anything past it is body.
     return `---\n${lines.join("\n")}\n---\n${body.replace(/^\n+/, "")}`;
 };
+
+// ONE FIELD CHANGED, AND NOTHING ELSE MOVED: what the panel writes when a value is changed where it is read. Only that
+// key's own lines are rewritten (its line, and the indented list under it); every other line of the header, comments,
+// order and quoting included, and the whole body, come back byte for byte. A list keeps the shape it was written in
+// (flow stays flow, a block list stays a block list), a new key goes last, and no values at all takes the key out. A file
+// with no header gets one; a header left with nothing in it goes away.
+const OPENING_FENCE = /^---[ \t]*\r?\n/;
+
+export const setField = (content: string, key: string, values: readonly string[]): string => {
+    const match = FRONTMATTER.exec(content);
+    const kept = values.map((value) => value.trim()).filter((value) => value !== "");
+    if (match === null) {
+        return kept.length === 0 ? content : `---\n${fieldLines(key, kept, undefined).join("\n")}\n---\n${content}`;
+    }
+    const newline = match[0].includes("\r\n") ? "\r\n" : "\n";
+    const innerStart = OPENING_FENCE.exec(content)?.[0].length ?? 0;
+    const inner = match[1] ?? "";
+    const lines = inner.split(/\r?\n/);
+    const at = lines.findIndex((line) => !/^[ \t]/.test(line) && keyLine(line)?.[0] === key);
+    let next: string[];
+    if (at === -1) {
+        if (kept.length === 0) {
+            return content;
+        }
+        // After the last line that says something, so a trailing blank or comment block stays where it was.
+        next = [...lines, ...fieldLines(key, kept, undefined)];
+    } else {
+        // The key's extent: its own line, then every indented line under it (blank lines inside a block list included).
+        let last = at;
+        for (let j = at + 1; j < lines.length; j++) {
+            const line = lines[j] ?? "";
+            if (line.trim() === "") {
+                continue;
+            }
+            if (!/^[ \t]/.test(line)) {
+                break;
+            }
+            last = j;
+        }
+        next = [...lines.slice(0, at), ...(kept.length === 0 ? [] : fieldLines(key, kept, lines.slice(at, last + 1))), ...lines.slice(last + 1)];
+    }
+    const body = content.slice(match[0].length);
+    if (next.every((line) => line.trim() === "")) {
+        return body;
+    }
+    return `${content.slice(0, innerStart)}${next.join(newline)}${content.slice(innerStart + inner.length)}`;
+};
+
+// A field's lines in the shape it was already written in, if it was.
+const fieldLines = (key: string, values: readonly string[], was: readonly string[] | undefined): string[] => {
+    const inline = was === undefined ? undefined : (keyLine(was[0] ?? "")?.[1] ?? "");
+    if (inline === "" && was !== undefined && was.length > 1) {
+        const indent = /^[ \t]*-[ \t]*/.exec(was.find((line) => blockItem(line) !== undefined) ?? "")?.[0] ?? "  - ";
+        return [`${key}:`, ...values.map((value) => `${indent}${emit(value)}`)];
+    }
+    if (values.length === 1 && !(inline?.startsWith("[") ?? false)) {
+        return [`${key}: ${emit(values[0] ?? "")}`];
+    }
+    return [`${key}: [${values.map(emit).join(", ")}]`];
+};
+
+// The body replaced, the header (fences and all) kept exactly as it is.
+export const setBody = (content: string, body: string): string => {
+    const match = FRONTMATTER.exec(content);
+    return `${match === null ? "" : match[0]}${body}`;
+};

@@ -11,7 +11,6 @@ import {
     type NoticeModel,
     type PickerOptions,
     SkeletonSnapshot,
-    useKeyedDraft,
     useLoadingReveal,
     useNarrow,
     useScrollReset,
@@ -61,7 +60,6 @@ const typeChoice = computed<string>({ get: () => type.value ?? ``, set: (value) 
 const tagChoice = computed<string>({ get: () => tag.value ?? ``, set: (value) => (tag.value = value === `` ? undefined : value) });
 
 const selected = ref<string>();
-const { draft } = useKeyedDraft(selected);
 
 // Resets the page scroll on note change; unlike an old per-pane scroller, the page's scrollport outlives it.
 useScrollReset(body, () => selected.value);
@@ -240,10 +238,11 @@ const startKnowledge = async (): Promise<void> => {
                 <NoteIndex :hits="hits" :selected="selected" :filtered="filtered" :is-loading="isLoading" @pick="open" />
             </div>
 
-            <!-- No `:key`: the page's scroll resets instead (useScrollReset), without discarding the pane or an open draft.
+            <!-- No `:key`: the page's scroll resets instead (useScrollReset), without discarding the pane, which keeps a note's
+                 unwritten prose (useNoteWriter) across a move to another note and back.
                  The box is the pane's imprint root, an element where the pane's own root is a component's. -->
             <div v-if="selected" v-skeleton-source="`knowledge.pane`" class="min-w-0 flex-1">
-                <KnowledgePane v-model:draft="draft" :path="selected" @open="open" @filter="showLinked" @forgotten="selected = undefined" />
+                <KnowledgePane :path="selected" @open="open" @filter="showLinked" @forgotten="selected = undefined" />
             </div>
 
             <!-- The first search is still out, so the first hit is about to open: the pane as it last looked, not "Pick a
