@@ -31,8 +31,8 @@ Start with `kb find <the words in the question>`. If it lands on a note, `kb rea
 matter: the connections are the point, and the neighbouring note is usually where the answer actually is.
 
 **Not for questions about the code.** How a package is put together, where a function lives, what a file does:
-that is `iq` and the repository's own documentation. The knowledge base is for the things around the code that no file
-records: people, decisions, agreements, vocabulary, context.
+that is the code itself (`rg`, Read) and the repository's own documentation. The knowledge base is for the things
+around the code that no file records: people, decisions, agreements, vocabulary, context.
 
 ## When to write to it
 

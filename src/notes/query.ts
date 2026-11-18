@@ -3,8 +3,7 @@ import { factsOf, type ParsedNote } from "./note.js";
 import { wikiLinksIn } from "./wiki-links.js";
 
 // Search, filter, and the neighbourhood around one note. Ranking is explainable, not a second retrieval engine: the
-// note actually named that, then one that goes by that, then notes that mention it. Fuzzy prose search is `iq`'s job,
-// not this one's.
+// note actually named that, then one that goes by that, then notes that mention it. It does no fuzzy prose search.
 
 export interface SearchFilters {
     readonly query?: string | undefined;
