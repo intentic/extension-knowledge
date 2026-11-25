@@ -3,7 +3,7 @@
      it shows, so the last words written on one note are written to that note, whichever is open by the time they land. -->
 <script setup lang="ts">
 import { MarkdownDocument, useDevice } from "@intentic/extension-ui";
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, watchEffect } from "vue";
+import { type ComponentPublicInstance, computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch, watchEffect } from "vue";
 
 const { path, body, unsaved, saving, decorate, resolve } = defineProps<{
     path: string;
@@ -47,7 +47,9 @@ const write = (value: string): void => {
 // note. So there it reads rendered, and a tap on the text puts the source under the finger; leaving renders it again. A
 // pointer has the rendered surface that takes a caret, so there it is always live.
 const { mobile } = useDevice();
-const box = ref<HTMLElement | null>(null);
+// The document's own root is the box: its padding, its measure and the presses below sit on it (attribute fallthrough).
+const doc = useTemplateRef<ComponentPublicInstance>(`doc`);
+const box = computed<HTMLElement | undefined>(() => doc.value?.$el);
 const touching = ref(false);
 const editable = computed(() => !mobile.value || touching.value);
 
@@ -86,7 +88,7 @@ const markLinks = (): void => {
 let watching: MutationObserver | undefined;
 onMounted(() => {
     watching = new MutationObserver(markLinks);
-    if (box.value !== null) {
+    if (box.value !== undefined) {
         watching.observe(box.value, { childList: true, subtree: true });
     }
     // The document lays out its blocks as it mounts, before this does, so its first drawing is marked here, not observed.
@@ -105,17 +107,20 @@ const leaveTouch = (event: FocusEvent): void => {
 </script>
 
 <template>
-    <div ref="box" class="px-5 py-4" style="--prose-measure: 74ch" @click="press" @focusout="leaveTouch">
-        <MarkdownDocument
-            v-model="text"
-            :editable="editable"
-            save="auto"
-            :stored="onDisk"
-            :saving="saving"
-            :decorate="decorate"
-            label="The note"
-            placeholder="Write the note."
-            @save="write"
-        />
-    </div>
+    <MarkdownDocument
+        ref="doc"
+        v-model="text"
+        :editable="editable"
+        save="auto"
+        :stored="onDisk"
+        :saving="saving"
+        :decorate="decorate"
+        label="The note"
+        placeholder="Write the note."
+        class="px-5 py-4"
+        style="--prose-measure: 74ch"
+        @save="write"
+        @click="press"
+        @focusout="leaveTouch"
+    />
 </template>
