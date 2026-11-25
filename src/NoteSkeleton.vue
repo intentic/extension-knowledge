@@ -32,8 +32,9 @@ const PARAGRAPHS = [
                     <span v-for="action in 4" :key="action" class="skeleton block h-7 w-7" />
                 </div>
             </div>
-            <div class="flex flex-col gap-1 border-b border-line-subtle px-4 py-2.5" aria-hidden="true">
-                <span class="flex h-4 items-center"><span class="skeleton block h-2.5 w-56 max-w-full" /></span>
+            <!-- `box-content h-4`: the meta line's text height inside the band's padding, so the bar centres on it. -->
+            <div class="box-content flex h-4 items-center border-b border-line-subtle px-4 py-2.5" aria-hidden="true">
+                <span class="skeleton block h-2.5 w-56 max-w-full" />
             </div>
         </template>
 

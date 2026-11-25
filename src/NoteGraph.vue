@@ -140,12 +140,12 @@ const openSelected = (): void => {
             <template #overlay>
                 <div class="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 p-2 text-2xs text-subtle">
                     <span v-if="graph?.omitted" class="rounded bg-surface/80 px-1.5 py-0.5">{{ graph.omitted }} more not shown</span>
-                    <span v-else></span>
+                    <!-- `ml-auto` keeps it right-aligned when the count above is absent. -->
                     <Button
                         v-if="selected && selected !== graph?.focus"
                         size="small"
                         severity="secondary"
-                        class="pointer-events-auto"
+                        class="pointer-events-auto ml-auto"
                         @click="openSelected"
                     >
                         Open this note
