@@ -66,15 +66,16 @@ const commit = (typed: string): void => {
 
 <template>
     <span class="grid min-w-0 grid-cols-1 grid-rows-1">
-        <span class="col-start-1 row-start-1 min-w-0" @focusin="writing = true" @focusout="writing = false">
-            <InPlaceText
-                :value="shown"
-                :label="label"
-                :placeholder="placeholder"
-                :class="linked && !writing ? `text-transparent` : ``"
-                @commit="commit"
-            />
-        </span>
+        <InPlaceText
+            :value="shown"
+            :label="label"
+            :placeholder="placeholder"
+            class="col-start-1 row-start-1"
+            :class="linked && !writing ? `text-transparent` : ``"
+            @commit="commit"
+            @focusin="writing = true"
+            @focusout="writing = false"
+        />
         <!-- Laid over the field and let through to it, but for the links themselves. -->
         <span v-if="linked && !writing" class="pointer-events-none col-start-1 row-start-1 min-w-0 truncate">
             <template v-for="(pieces, at) in read" :key="at">

@@ -60,13 +60,14 @@ const pickTyped = (): void => {
                 <span class="min-w-0 flex-1 truncate">{{ kind }}</span>
                 <Icon v-if="kind === type" name="check" class="text-2xs text-muted" />
             </button>
+            <!-- `pl-6` is a kind's padding, dot and gap, so this lines up with the kinds' names. -->
             <button
                 v-if="type !== undefined"
                 type="button"
-                class="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted transition-colors hover:bg-content/5"
+                class="flex items-center rounded-md py-1.5 pr-2 pl-6 text-left text-sm text-muted transition-colors hover:bg-content/5"
                 @click="pick(undefined)"
             >
-                <span class="size-2 shrink-0" aria-hidden="true" />No kind
+                No kind
             </button>
             <form class="mt-1 border-t border-line-subtle px-1 pt-2" @submit.prevent="pickTyped">
                 <input v-model="typed" type="text" aria-label="Another kind" placeholder="Another kind" autocomplete="off" spellcheck="false" :class="ui.input({ size: `sm` }, `w-full`)" />
